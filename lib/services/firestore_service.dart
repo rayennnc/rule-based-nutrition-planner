@@ -82,20 +82,20 @@ class FirestoreService {
       final kond = f.kondisi.toLowerCase();
       final n = f.name.toLowerCase(); // Check nama
 
-      // yang masuk daftar blacklist
+      // yang masuk daftar blacklist (Bahan mentah non-lauk)
       bool isBanned = n.contains('tepung') ||
           n.contains('minyak') ||
           n.contains('bumbu') ||
           n.contains('penyedap') ||
           n.contains('santan') ||
           n.contains('bubuk') ||
-          n.contains('beras');
+          n.contains('beras'); // Beras diban, Nasi diizinkan
 
       if (isBanned) {
         return false; // Membuang item yang termasuk di daftar blacklist
       }
       
-      // Keep only edible items: Matang / Olahan, or Buah/Minuman
+      // Keep only edible items: Matang / Olahan, Mentah (Lauk), or Buah/Minuman
       return kond == 'matang' ||
           kond == 'olahan' ||
           kond == 'mentah' ||
@@ -113,7 +113,7 @@ class FirestoreService {
         .where((f) => catMatches(f, [
               'nasi',
               'serealia',
-              'beras',
+              'beras', // Jaga-jaga kalau lolos filter nama
               'umbi',
               'ubi',
               'roti',
@@ -160,8 +160,9 @@ class FirestoreService {
     };
   }
 
-  // Generate balanced meal plan
-  Future<List<FoodItem>> generateMealPlan(int targetCalories) async {
+  // Generate balanced meal plan with SMART SORTING based on Macros
+  // Parameter 'ratios' ditambahkan (opsional) untuk prioritas nutrisi
+  Future<List<FoodItem>> generateMealPlan(int targetCalories, {Map<String, double>? ratios}) async {
     final cats = await getBalancedFoods();
     final karbo = cats['karbo'] ?? [];
     final lauk = cats['protein'] ?? [];
@@ -177,14 +178,16 @@ class FirestoreService {
     int bestDiffFallback = 99999;
 
     // Toleransi kalori yang dianggap "Bagus" (misal +/- 50 kalori)
-    // Semakin besar angkanya, semakin banyak variasi menu, tapi kalori makin kurang akurat.
     int tolerance = 50;
 
+    // TAHAP 1: CARI KANDIDAT BERDASARKAN KALORI (Brute Force)
+    
     // A. Coba Kombinasi 3 Item (Karbo + Lauk + Sayur)
     if (sayur.isNotEmpty) {
       for (var k in karbo) {
         for (var p in lauk) {
           for (var s in sayur) {
+            // Hindari duplikasi item yang sama
             if (k.id == p.id || k.id == s.id || p.id == s.id) continue;
 
             final total = k.calories + p.calories + s.calories;
@@ -229,17 +232,67 @@ class FirestoreService {
       }
     }
 
-    // LOGIC FINAL: MEMILIH PEMENANG
+    // TAHAP 2: SMART SORTING & PEMILIHAN PEMENANG
+
     if (candidates.isNotEmpty) {
-      // Jika ada kandidat bagus, PILIH SECARA ACAK
+      
+      // JIKA ADA RASIO (User memilih preferensi makro)
+      // Kita urutkan kandidat berdasarkan prioritas nutrisi tersebut
+      if (ratios != null) {
+        String priority = 'balanced';
+        
+        // Tentukan prioritas berdasarkan persentase
+        if ((ratios['protein'] ?? 0) >= 0.30) {
+          priority = 'protein'; // High Protein Diet
+        } else if ((ratios['fat'] ?? 0) >= 0.35) {
+          priority = 'fat'; // High Fat / Keto
+        } else if ((ratios['carbs'] ?? 0) >= 0.55) {
+          priority = 'carbs'; // High Carbs
+        }
+
+        // Sorting Logika: Urutkan kandidat dari yang nutrisinya paling tinggi
+        candidates.sort((a, b) {
+          // Hitung total nutrisi paket A
+          double proteinA = a.fold(0, (sum, item) => sum + item.protein.toDouble());
+          double fatA = a.fold(0, (sum, item) => sum + item.fat.toDouble());
+          double carbsA = a.fold(0, (sum, item) => sum + item.carbs.toDouble());
+
+          // Hitung total nutrisi paket B
+          double proteinB = b.fold(0, (sum, item) => sum + item.protein.toDouble());
+          double fatB = b.fold(0, (sum, item) => sum + item.fat.toDouble());
+          double carbsB = b.fold(0, (sum, item) => sum + item.carbs.toDouble());
+
+          
+
+          // Bandingkan berdasarkan prioritas user
+          if (priority == 'protein') return proteinB.compareTo(proteinA); // Protein tertinggi di atas
+          if (priority == 'fat') return fatB.compareTo(fatA);             // Lemak tertinggi di atas
+          if (priority == 'carbs') return carbsB.compareTo(carbsA);       // Karbo tertinggi di atas
+          
+          return 0; // Kalau balanced, biarkan urutan acak
+        });
+
+        // Ambil Top 5 Terbaik, lalu acak sedikit biar variatif
+        // Tujuannya supaya user tidak bosan dikasih menu nomor 1 terus
+        int takeCount = candidates.length > 5 ? 5 : candidates.length;
+        List<List<FoodItem>> topCandidates = candidates.take(takeCount).toList();
+        
+        return topCandidates[_random.nextInt(topCandidates.length)];
+      }
+
+      // JIKA TIDAK ADA RASIO (Default)
+      // Pilih secara ACAK murni dari semua kandidat yang lolos toleransi kalori
       return candidates[_random.nextInt(candidates.length)];
-    } else {
-      // Jika tidak ada yang masuk toleransi, pakai yang terbaik absolut (fallback)
+    } 
+    
+    // TAHAP 3: FALLBACK (Jika tidak ada kandidat yang pas toleransi)
+    else {
+      // Pakai yang terbaik absolut (selisih terkecil)
       if (bestFallback.isNotEmpty) {
         return bestFallback;
       }
 
-      // Fallback terakhir: 1 item terdekat
+      // Fallback terakhir: Cari 1 item tunggal yang kalorinya paling mendekati
       final allEdible = [...karbo, ...lauk];
       if (allEdible.isNotEmpty) {
         return [

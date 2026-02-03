@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/calculator_service.dart';
+import '../services/local_storage_service.dart';
 import 'results_screen.dart';
 
 class InputFormScreen extends StatefulWidget {
@@ -15,9 +16,60 @@ class _InputFormScreenState extends State<InputFormScreen> {
   final _weightController = TextEditingController();
   final _heightController = TextEditingController();
   final _ageController = TextEditingController();
+  final LocalStorageService _localStorageService =  LocalStorageService(); // service penyimpanan Local Storage
 
   Gender? _selectedGender;
   ActivityLevel? _selectedActivityLevel;
+
+  @override
+  void initState() {
+    super.initState();
+    // 1. Panggil fungsi load saat layar dibuka
+    _loadUserData();
+  }
+
+  // Fungsi untuk memuat data dari memori HP ke Form
+  Future<void> _loadUserData() async {
+    final data = await _localStorageService.loadDataUser();
+    
+    if (mounted) {
+      setState(() {
+        // Isi Text Controllers
+        _weightController.text = data['berat'] ?? '';
+        _heightController.text = data['tinggi'] ?? '';
+        _ageController.text = data['usia'] ?? '';
+
+        // Isi Dropdown Gender (Konversi String -> Enum)
+        if (data['gender'] == 'Laki - Laki') {
+          _selectedGender = Gender.male;
+        } else if (data['gender'] == 'Perempuan') {
+          _selectedGender = Gender.female;
+        }
+
+        // Isi Dropdown Aktivitas (Konversi String -> Enum)
+        String activityStr = data['aktivitas'] ?? 'Sedang';
+        switch (activityStr) {
+          case 'Tidak Bergerak Banyak':
+            _selectedActivityLevel = ActivityLevel.sedentary;
+            break;
+          case 'Ringan':
+            _selectedActivityLevel = ActivityLevel.light;
+            break;
+          case 'Sedang':
+            _selectedActivityLevel = ActivityLevel.moderate;
+            break;
+          case 'Aktif':
+            _selectedActivityLevel = ActivityLevel.active;
+            break;
+          case 'Sangat Aktif':
+            _selectedActivityLevel = ActivityLevel.veryActive;
+            break;
+          default:
+            _selectedActivityLevel = ActivityLevel.moderate;
+        }
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -29,6 +81,30 @@ class _InputFormScreenState extends State<InputFormScreen> {
 
   void _calculate() {
     if (_formKey.currentState!.validate()) {
+
+      // 2. Simpan Data ke HP sebelum pindah halaman
+      // Kita harus ubah Enum kembali ke String biar bisa disimpan
+      String genderStr = _selectedGender == Gender.male ? 'Laki - Laki' : 'Perempuan';
+
+      String activityStr = 'Ringan';
+      switch (_selectedActivityLevel!) {
+        case ActivityLevel.sedentary: activityStr = 'Tidak Bergerak Banyak'; break;
+        case ActivityLevel.light: activityStr = 'Ringan'; break;
+        case ActivityLevel.moderate: activityStr = 'Sedang'; break;
+        case ActivityLevel.active: activityStr = 'Aktif'; break;
+        case ActivityLevel.veryActive: activityStr = 'Sangat Aktif'; break;
+      }
+
+      // Eksekusi Simpan
+      _localStorageService.simpanDataUser(
+        berat: _weightController.text,
+        tinggi: _heightController.text,
+        usia: _ageController.text,
+        gender: genderStr,
+        aktivitas: activityStr,
+      );
+
+      // Logika Perhitungan
       final calculator = CalculatorService(
         gender: _selectedGender!,
         weight: double.parse(_weightController.text),

@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../services/calculator_service.dart';
 import '../services/firestore_service.dart';
 import '../services/macro_nutrient.dart'; // add import
+import '../services/local_storage_service.dart';
 import '../screens/macro_customization.dart'; // add import
 import '../screens/food_search.dart'; // add import
 import '../auth/auth_service.dart';
@@ -30,6 +31,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
 
   final FirestoreService _firestoreService = FirestoreService();
   final AuthService _authService = AuthService(); // add this
+  final LocalStorageService _storageService = LocalStorageService();
 
   @override
   void initState() {
@@ -63,9 +65,10 @@ class _ResultsScreenState extends State<ResultsScreen> {
 
   Future<void> _logout() async {
     try {
+      await _storageService.hapusDataUser();
       await _authService.signOut();
       if (mounted) {
-        // Navigate to welcome screen & remove all routes
+        // Kembali ke halaman Welcome dan hapus semua rute sebelumnya
         Navigator.of(context)
             .pushNamedAndRemoveUntil('/welcome', (route) => false);
       }
@@ -259,7 +262,13 @@ class _ResultsScreenState extends State<ResultsScreen> {
         FutureBuilder<List<FoodItem>>(
 
           // Panggil generateMealPlan dari firestore_service.dart
-          future: _firestoreService.generateMealPlan(targetCalories),
+          future: _firestoreService.generateMealPlan(targetCalories, ratios: _selectedMacro != null ? {
+            'protein': _selectedMacro!.proteinPercent / 100,
+            'carbs': _selectedMacro!.carbPercent / 100,
+            'fat': _selectedMacro!.fatPercent / 100,
+          }
+          : null,
+          ),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());

@@ -29,10 +29,13 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
   @override
   void initState() {
     super.initState();
-    // Default: 50% carb, 25% protein, 25% fat
-    _carbCtl = TextEditingController(text: '50');
-    _proteinCtl = TextEditingController(text: '25');
-    _fatCtl = TextEditingController(text: '25');
+    // Default start with Balanced Diet (WHO Standard)
+    _carbCtl = TextEditingController(
+        text: MacroNutrient.balanced.carbPercent.toStringAsFixed(0));
+    _proteinCtl = TextEditingController(
+        text: MacroNutrient.balanced.proteinPercent.toStringAsFixed(0));
+    _fatCtl = TextEditingController(
+        text: MacroNutrient.balanced.fatPercent.toStringAsFixed(0));
     _updateMacro();
   }
 
@@ -64,7 +67,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
       } else {
         _errorMessage = null;
 
-        // Check AMDR
+        // Check AMDR / WHO Limits
         _warningMessage = _currentMacro!.getAMDRWarning();
         _showWarning = _warningMessage != null;
       }
@@ -94,10 +97,15 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
   }
 
   void _setPreset(double carb, double protein, double fat) {
-    _carbCtl.text = carb.toString();
-    _proteinCtl.text = protein.toString();
-    _fatCtl.text = fat.toString();
+    _carbCtl.text = carb.toStringAsFixed(0); // Hilangkan koma desimal di UI
+    _proteinCtl.text = protein.toStringAsFixed(0);
+    _fatCtl.text = fat.toStringAsFixed(0);
     _updateMacro();
+  }
+
+  // Helper untuk menggunakan Preset Object langsung
+  void _usePreset(MacroNutrient preset) {
+    _setPreset(preset.carbPercent, preset.proteinPercent, preset.fatPercent);
   }
 
   @override
@@ -111,22 +119,22 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
           children: [
             // Info card
             Card(
-              color: Colors.blue.withOpacity(0.1),
+              color: Colors.green.withOpacity(0.1), // Ganti hijau biar fresh
               child: Padding(
                 padding: const EdgeInsets.all(12.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Target Kalori Harian',
+                      'Target Kalori Harian (TDEE)',
                       style: TextStyle(fontSize: 14, color: Colors.black54),
                     ),
                     Text(
-                      '${widget.tdee} kalori',
+                      '${widget.tdee} kkal',
                       style: const TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
-                        color: Colors.blue,
+                        color: Colors.green,
                       ),
                     ),
                   ],
@@ -146,7 +154,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
             _buildMacroInput(
               label: 'Karbohidrat (%)',
               controller: _carbCtl,
-              hint: '45-65',
+              hint: '45-75', // Updated hint sesuai WHO
               color: Colors.orange,
             ),
             const SizedBox(height: 12),
@@ -155,7 +163,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
             _buildMacroInput(
               label: 'Protein (%)',
               controller: _proteinCtl,
-              hint: '10-35',
+              hint: '10-35', // Updated hint sesuai AMDR
               color: Colors.red,
             ),
             const SizedBox(height: 12),
@@ -164,12 +172,12 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
             _buildMacroInput(
               label: 'Lemak (%)',
               controller: _fatCtl,
-              hint: '20-35',
-              color: Colors.yellow,
+              hint: '15-35', // Updated hint sesuai WHO/AMDR
+              color: Colors.yellow[700]!,
             ),
             const SizedBox(height: 24),
 
-            // Total & Error
+            // Total & Error Validation
             if (_errorMessage != null)
               Container(
                 padding: const EdgeInsets.all(12),
@@ -193,14 +201,20 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
                   border: Border.all(color: Colors.green),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Text(
-                  'Total: ${((double.tryParse(_carbCtl.text) ?? 0) + (double.tryParse(_proteinCtl.text) ?? 0) + (double.tryParse(_fatCtl.text) ?? 0)).toStringAsFixed(1)}%',
-                  style: const TextStyle(
-                      color: Colors.green, fontWeight: FontWeight.w600),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text("Total Persentase:", style: TextStyle(color: Colors.green)),
+                    Text(
+                      '${((double.tryParse(_carbCtl.text) ?? 0) + (double.tryParse(_proteinCtl.text) ?? 0) + (double.tryParse(_fatCtl.text) ?? 0)).toStringAsFixed(0)}%',
+                      style: const TextStyle(
+                          color: Colors.green, fontWeight: FontWeight.bold, fontSize: 18),
+                    ),
+                  ],
                 ),
               ),
 
-            // Warning
+            // Warning AMDR/WHO
             if (_showWarning && _warningMessage != null) ...[
               const SizedBox(height: 12),
               Container(
@@ -215,10 +229,10 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
                   children: [
                     const Row(
                       children: [
-                        Icon(Icons.warning, color: Colors.orange, size: 20),
+                        Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 20),
                         SizedBox(width: 8),
                         Text(
-                          'Peringatan',
+                          'Perhatian (Standar Kesehatan)',
                           style: TextStyle(
                             color: Colors.orange,
                             fontWeight: FontWeight.w600,
@@ -240,38 +254,67 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
 
             const SizedBox(height: 24),
 
-            // Preset buttons
+            // --- TOMBOL PRESET (INI YANG PENTING DIUBAH) ---
             const Text(
-              'Preset Populer',
+              'Rekomendasi',
               style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Row(
               children: [
+                // 1. Tombol Balanced (WHO)
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: () => _setPreset(50, 25, 25),
-                    child: const Text('50-25-25\n(Balanced)',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 12)),
+                    onPressed: () => _usePreset(MacroNutrient.balanced),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: const Column(
+                      children: [
+                        Text('Seimbang', style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text('(WHO Standard)\n60-15-25', 
+                             textAlign: TextAlign.center, 
+                             style: TextStyle(fontSize: 10, color: Colors.grey)),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
+                
+                // 2. Tombol High Protein (Atlet)
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: () => _setPreset(55, 30, 15),
-                    child: const Text('55-30-15\n(Lean)',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 12)),
+                    onPressed: () => _usePreset(MacroNutrient.highProtein),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: const Column(
+                      children: [
+                        Text('Atlet', style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text('(High Protein)\n50-30-20', 
+                             textAlign: TextAlign.center, 
+                             style: TextStyle(fontSize: 10, color: Colors.grey)),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
+
+                // 3. Tombol Low Fat (Opsional)
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: () => _setPreset(45, 35, 20),
-                    child: const Text('45-35-20\n(High Protein)',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 12)),
+                    onPressed: () => _usePreset(MacroNutrient.lowFat),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: const Column(
+                      children: [
+                        Text('Low Fat', style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text('(Cegah Obesitas)\n70-15-15', 
+                             textAlign: TextAlign.center, 
+                             style: TextStyle(fontSize: 10, color: Colors.grey)),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -279,23 +322,28 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
 
             const SizedBox(height: 24),
 
-            // Macro breakdown preview
+            // Macro breakdown preview (Lingkaran/Bar Visual)
             if (_currentMacro != null && _errorMessage == null)
               _buildMacroBreakdown(),
 
             const SizedBox(height: 24),
 
             // Save button
-            ElevatedButton.icon(
-              icon: const Icon(Icons.save),
-              label: const Text('Simpan'),
-              onPressed: _errorMessage == null ? _save : null,
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                backgroundColor:
-                    _errorMessage == null ? Colors.green : Colors.grey,
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.check_circle, color: Colors.white),
+                label: const Text('SIMPAN PREFERENSI', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                onPressed: _errorMessage == null ? _save : null,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  backgroundColor:
+                      _errorMessage == null ? Colors.green : Colors.grey,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
               ),
             ),
+            const SizedBox(height: 20),
           ],
         ),
       ),
@@ -314,15 +362,20 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
+        suffixText: '%',
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide(color: color),
+        ),
+        enabledBorder: OutlineInputBorder(
+           borderRadius: BorderRadius.circular(8),
+           borderSide: BorderSide(color: color.withOpacity(0.5)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide(color: color, width: 2),
         ),
-        prefixIcon: Icon(Icons.percent, color: color),
+        prefixIcon: Icon(Icons.pie_chart, color: color),
       ),
       onChanged: (_) => _updateMacro(),
     );
@@ -335,7 +388,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Breakdown Makronutrien',
+          'Estimasi Gram per Hari',
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 12),
@@ -364,7 +417,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
                 label: 'Lemak',
                 percent: _currentMacro!.fatPercent,
                 grams: grams['fat']!,
-                color: Colors.yellow,
+                color: Colors.yellow[700]!,
               ),
             ),
           ],
@@ -380,31 +433,30 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
     required Color color,
   }) {
     return Card(
+      elevation: 2,
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: color),
+          border: Border.all(color: color.withOpacity(0.3)),
+          color: Colors.white,
         ),
         padding: const EdgeInsets.all(12),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               label,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey[700]),
               maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 8),
             Text(
-              '${percent.toStringAsFixed(1)}%',
+              '${percent.toStringAsFixed(0)}%',
               style: TextStyle(
-                  fontSize: 16, fontWeight: FontWeight.bold, color: color),
+                  fontSize: 20, fontWeight: FontWeight.bold, color: color),
             ),
-            const SizedBox(height: 4),
             Text(
               '${grams.toStringAsFixed(0)}g',
-              style: const TextStyle(fontSize: 12, color: Colors.black54),
+              style: const TextStyle(fontSize: 14, color: Colors.black87, fontWeight: FontWeight.w500),
             ),
           ],
         ),
