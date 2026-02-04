@@ -7,6 +7,7 @@ import '../services/local_storage_service.dart';
 import '../screens/macro_customization.dart'; // add import
 import '../screens/food_search.dart'; // add import
 import '../auth/auth_service.dart';
+import '../widgets/meal_item_card.dart'; // add import
 
 class ResultsScreen extends StatefulWidget {
   final CalculatorService calculator;
@@ -116,7 +117,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
               // Ambil data dulu (cepat kok)
               // Kalau mau lebih cepat lagi, load data ini di initState
               final allFoods = await _firestoreService.getAllFoodItems();
-              
               showSearch(
                 context: context,
                 delegate: FoodSearch(
@@ -183,7 +183,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
             'Mempertahankan Berat Badan', 'Sesuai TDEE', DietGoal.maintain),
         const SizedBox(height: 12),
         _buildGoalButton('Menaikkan Berat Badan',
-            'Surplus Kalori 300-500kal/hari', DietGoal.gain),
+            'Surplus Kalori 500kal/hari', DietGoal.gain),
       ],
     );
   }
@@ -213,10 +213,10 @@ class _ResultsScreenState extends State<ResultsScreen> {
 
   Widget _buildMealPlan() {
     // Calorie distribution based on proposal
-    int breakfastCals = (_finalCalories! * 0.25).round(); // 20-25%
-    int lunchCals = (_finalCalories! * 0.35).round(); // 30-35%
+    int breakfastCals = (_finalCalories! * 0.20).round(); // 20%
+    int lunchCals = (_finalCalories! * 0.30).round(); // 30%
     int dinnerCals = (_finalCalories! * 0.30).round(); // 30%
-    // Snacks would be the remaining ~10-15%
+    int snackCals = (_finalCalories! * 0.20).round(); // 20%
 
     return Column(
       children: [
@@ -230,6 +230,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
         _buildMealSection('Sarapan', breakfastCals),
         _buildMealSection('Makan Siang', lunchCals),
         _buildMealSection('Makan Malam', dinnerCals),
+        _buildMealSection('Camilan', snackCals),
       ],
     );
   }
@@ -260,7 +261,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
 
         const SizedBox(height: 8),
         FutureBuilder<List<FoodItem>>(
-
           // Panggil generateMealPlan dari firestore_service.dart
           future: _firestoreService.generateMealPlan(targetCalories, ratios: _selectedMacro != null ? {
             'protein': _selectedMacro!.proteinPercent / 100,
@@ -283,31 +283,20 @@ class _ResultsScreenState extends State<ResultsScreen> {
             int diff = (targetCalories - totalCals).abs();
 
             return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Display combination info
                 Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Kombinasi ${combination.length} item',
-                          style: const TextStyle(fontWeight: FontWeight.bold)),
-                      Text('Total: $totalCals kalori (selisih: $diff kal)',
-                          style: const TextStyle(
-                              fontSize: 12, color: Colors.black54)),
-                    ],
-                  ),
+                  padding: const EdgeInsets.all(8),
+                  width: double.infinity,
+                  color: Colors.green.withOpacity(0.1),
+                  child: Text("Total Opsi Ini: $totalCals kkal", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
                 ),
-                const SizedBox(height: 12),
-                // Display food items in combination
-                Column(
-                  children: combination.map((item) => _buildFoodItemRow(item)).toList(),
-                ),
+                const SizedBox(height: 8),
+                
+                //FITUR UTAMA: MENGGUNAKAN MEAL ITEM CARD (BISA SWAP)
+                ...combination.map((item) => MealItemCard(
+                  foodItem: item,
+                  category: item.kategori,
+                )).toList(),
               ],
             );
           },

@@ -60,16 +60,40 @@ class MealCombination {
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final Random _random = Random(); // Untuk randomisasi
+  
+  // Cache sederhana untuk mengurangi beban fetch berulang
+  List<FoodItem>? _cachedFoodItems;
 
   // Fetch semua food items dari Firestore
   Future<List<FoodItem>> getAllFoodItems() async {
     try {
+      // Check cache dulu
+      if (_cachedFoodItems != null && _cachedFoodItems!.isNotEmpty) {
+        return _cachedFoodItems!;
+      }
+
+      // Jika tidak ada di cache, fetch dari Firestore
       QuerySnapshot snapshot = await _db.collection('makanan').get();
-      return snapshot.docs.map((doc) => FoodItem.fromFirestore(doc)).toList();
+
+      // Simpan ke cache
+      _cachedFoodItems = snapshot.docs.map((doc) => FoodItem.fromFirestore(doc)).toList();
+      return _cachedFoodItems!;
+
     } catch (e) {
       print("Error fetching all food items: $e");
       return [];
     }
+  }
+
+  // Fetch food items by category for swapping
+  Future<List<FoodItem>> getFoodCandidates(String category) async {
+    final allFoods = await getAllFoodItems();
+    
+    // Filter di aplikasi (bukan di database) supaya hemat read
+    // Cari yang kategorinya sama
+    return allFoods.where((item) => 
+      item.kategori.toLowerCase() == category.toLowerCase()
+    ).toList();
   }
 
   // Group and filter foods to build balanced menus
