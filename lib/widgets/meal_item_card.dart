@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/firestore_service.dart';
+import '../screens/food_search.dart';
 
 class MealItemCard extends StatefulWidget {
   final FoodItem foodItem; // Data makanan awal
@@ -68,6 +69,71 @@ class _MealItemCardState extends State<MealItemCard> {
     }
   }
 
+  // OPEN SEARCH DIALOG & SWAP MANUAL
+  Future<void> _openSearchAndSwap() async {
+    setState(() => isSwapping = true);
+
+    // Ambil kandidat (menggunakan cache di FirestoreService)
+    List<FoodItem> candidates =
+        await _firestoreService.getFoodCandidates(widget.category);
+
+    // Jika tidak ada kandidat selain item yang sedang tampil
+    var filtered = candidates.where((f) => f.id != currentFood.id).toList();
+
+    if (filtered.isEmpty) {
+      setState(() => isSwapping = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Tidak ada opsi pengganti lain.")),
+      );
+      return;
+    }
+
+    // Tampilkan SearchDelegate
+    await showSearch(
+      context: context,
+      delegate: FoodSearch(
+        foodList: filtered,
+        onItemTap: (FoodItem item) {
+          // Validasi kalori
+          if (item.calories <= 0) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content:
+                      Text("Data kalori tidak tersedia untuk pilihan ini.")),
+            );
+            // tutup search
+            Navigator.pop(context);
+            setState(() => isSwapping = false);
+            return;
+          }
+
+          double targetCalories = (currentFood.calories * currentWeight / 100);
+          double newWeightDouble = (targetCalories / item.calories) * 100;
+          int newWeight = newWeightDouble.isFinite
+              ? newWeightDouble.round().clamp(10, 2000)
+              : 100;
+
+          setState(() {
+            currentFood = item;
+            currentWeight = newWeight;
+            isSwapping = false;
+          });
+
+          Navigator.pop(context); // tutup search
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content:
+                    Text('Diganti menjadi ${item.name} — ${currentWeight}g')),
+          );
+        },
+      ),
+    );
+
+    // Jika user menutup search tanpa memilih
+    if (mounted) setState(() => isSwapping = false);
+  }
+
   @override
   Widget build(BuildContext context) {
     // Hitung nutrisi Real-time berdasarkan berat baru
@@ -84,66 +150,78 @@ class _MealItemCardState extends State<MealItemCard> {
         onTap: () => _showFoodDetail(context, currentFood),
         child: Padding(
           padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            // Gambar (tampilkan kalau ada imageUrl, pakai placeholder jika tidak)
-            Container(
-              width: 60,
-              height: 60,
-              decoration: BoxDecoration(
-                  color: Colors.grey[200],
-                  borderRadius: BorderRadius.circular(8)),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: (currentFood.imageUrl != null &&
-                        currentFood.imageUrl!.trim().isNotEmpty)
-                    ? _buildImageWidget(currentFood.imageUrl!)
-                    : const Icon(Icons.fastfood, color: Colors.grey),
+          child: Row(
+            children: [
+              // Gambar (tampilkan kalau ada imageUrl, pakai placeholder jika tidak)
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    borderRadius: BorderRadius.circular(8)),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: (currentFood.imageUrl != null &&
+                          currentFood.imageUrl!.trim().isNotEmpty)
+                      ? _buildImageWidget(currentFood.imageUrl!)
+                      : const Icon(Icons.fastfood, color: Colors.grey),
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
+              const SizedBox(width: 12),
 
-            // Info Text
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              // Info Text
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(currentFood.name,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text("$currentWeight gram",
+                        style: const TextStyle(
+                            color: Colors.green, fontWeight: FontWeight.bold)),
+                    Text(
+                      "P: ${realP.toStringAsFixed(1)} | K: ${realC.toStringAsFixed(1)} | L: ${realF.toStringAsFixed(1)}",
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Tombol Swap & Kalori
+              Column(
                 children: [
-                  Text(currentFood.name,
+                  Text("$realCal kkal",
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 16)),
-                  Text("$currentWeight gram",
-                      style: const TextStyle(
-                          color: Colors.green, fontWeight: FontWeight.bold)),
-                  Text(
-                    "P: ${realP.toStringAsFixed(1)} | K: ${realC.toStringAsFixed(1)} | L: ${realF.toStringAsFixed(1)}",
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
+                  isSwapping
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon:
+                                  const Icon(Icons.search, color: Colors.green),
+                              onPressed: _openSearchAndSwap,
+                              tooltip: "Cari Pengganti",
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.autorenew,
+                                  color: Colors.blue),
+                              onPressed: _swapMenu,
+                              tooltip: "Ganti Acak",
+                            ),
+                          ],
+                        )
                 ],
-              ),
-            ),
-
-            // Tombol Swap & Kalori
-            Column(
-              children: [
-                Text("$realCal kkal",
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 16)),
-                isSwapping
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : IconButton(
-                        icon: const Icon(Icons.autorenew, color: Colors.blue),
-                        onPressed: _swapMenu,
-                        tooltip: "Ganti Menu",
-                      )
-              ],
-            )
-          ],
+              )
+            ],
+          ),
         ),
       ),
-     ),
     );
   }
 
