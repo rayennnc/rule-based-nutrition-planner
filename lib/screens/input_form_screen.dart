@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/calculator_service.dart';
 import '../services/local_storage_service.dart';
+import '../auth/auth_service.dart';
 import 'results_screen.dart';
 
 class InputFormScreen extends StatefulWidget {
@@ -17,6 +18,7 @@ class _InputFormScreenState extends State<InputFormScreen> {
   final _heightController = TextEditingController();
   final _ageController = TextEditingController();
   final LocalStorageService _localStorageService =  LocalStorageService(); // service penyimpanan Local Storage
+  final AuthService _authService = AuthService();
 
   Gender? _selectedGender;
   ActivityLevel? _selectedActivityLevel;
@@ -120,6 +122,38 @@ class _InputFormScreenState extends State<InputFormScreen> {
         ),
       );
     }
+  }
+
+  Future<void> _logout() async {
+    try {
+      await _localStorageService.hapusDataUser();
+      await _authService.signOut();
+      if (mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil('/welcome', (route) => false);
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Logout error: $e')));
+    }
+  }
+
+  void _showLogoutDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Apakah Anda yakin ingin logout?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _logout();
+            },
+            child: const Text('Logout', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
