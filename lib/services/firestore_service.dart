@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:math';
+import 'macro_nutrient.dart';
 
 class FoodItem {
   final String id;
@@ -60,9 +61,133 @@ class MealCombination {
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final Random _random = Random(); // Untuk randomisasi
-  
+
   // Cache sederhana untuk mengurangi beban fetch berulang
   List<FoodItem>? _cachedFoodItems;
+
+  // Simpan measurement (BMI, weight, TDEE) ke Firestore
+  // Dipanggil setiap kali user set diet goal
+  Future<void> saveMeasurement({
+    required String uid,
+    required double weight,
+    required double bmi,
+    required int tdee,
+    required String goal,
+  }) async {
+    try {
+      final now = Timestamp.now();
+      final docId =
+          now.millisecondsSinceEpoch.toString(); // Use timestamp as doc ID
+
+      await _db
+          .collection('users')
+          .doc(uid)
+          .collection('measurements')
+          .doc(docId)
+          .set({
+        'date': now,
+        'weight': weight,
+        'bmi': bmi,
+        'tdee': tdee,
+        'goal': goal,
+        'createdAt': now,
+      });
+
+      print('✅ Measurement saved to Firestore');
+    } catch (e) {
+      print('❌ Error saving measurement: $e');
+    }
+  }
+
+  // Simpan macro preferences ke Firestore
+  // Dipanggil saat user selesai customize macro ratio
+  Future<void> saveMacroPreferences({
+    required String uid,
+    required double carbPercent,
+    required double proteinPercent,
+    required double fatPercent,
+  }) async {
+    try {
+      await _db
+          .collection('users')
+          .doc(uid)
+          .collection('preferences')
+          .doc('macros')
+          .set({
+        'carbPercent': carbPercent,
+        'proteinPercent': proteinPercent,
+        'fatPercent': fatPercent,
+        'updatedAt': Timestamp.now(),
+      });
+      print('✅ Macro preferences saved to Firestore');
+    } catch (e) {
+      print('❌ Error saving macro preferences: $e');
+    }
+  }
+
+  // Load macro preferences from Firestore (returns null if not found)
+  Future<MacroNutrient?> loadMacroPreferences(String uid) async {
+    try {
+      final doc = await _db
+          .collection('users')
+          .doc(uid)
+          .collection('preferences')
+          .doc('macros')
+          .get();
+      if (!doc.exists) return null;
+      final data = (doc.data() ?? {}) as Map<String, dynamic>;
+      final carb = (data['carbPercent'] as num?)?.toDouble();
+      final protein = (data['proteinPercent'] as num?)?.toDouble();
+      final fat = (data['fatPercent'] as num?)?.toDouble();
+      if (carb == null || protein == null || fat == null) return null;
+      return MacroNutrient(
+        carbPercent: carb,
+        proteinPercent: protein,
+        fatPercent: fat,
+      );
+    } catch (e) {
+      print('❌ Error loading macro preferences: $e');
+      return null;
+    }
+  }
+
+  // Load user profile from /users/{uid} (one-time read)
+  // Returns null if not found
+  Future<Map<String, dynamic>?> loadUserProfile(String uid) async {
+    try {
+      final doc = await _db.collection('users').doc(uid).get();
+      if (!doc.exists) return null;
+      final data = (doc.data() ?? {}) as Map<String, dynamic>;
+
+      // Normalize keys we use in the app
+      final profile = <String, dynamic>{};
+      if (data.containsKey('weightKg')) profile['weightKg'] = data['weightKg'];
+      if (data.containsKey('heightCm')) profile['heightCm'] = data['heightCm'];
+      if (data.containsKey('age')) profile['age'] = data['age'];
+      if (data.containsKey('gender')) profile['gender'] = data['gender'];
+      if (data.containsKey('activityLevel'))
+        profile['activityLevel'] = data['activityLevel'];
+
+      return profile;
+    } catch (e) {
+      print('❌ Error loading user profile: $e');
+      return null;
+    }
+  }
+
+  // Load the most recent measurement for a user (measurements subcollection)
+  Future<Map<String, dynamic>?> loadLastMeasurement(String uid) async {
+    try {
+      final col = _db.collection('users').doc(uid).collection('measurements');
+      final q = await col.orderBy('createdAt', descending: true).limit(1).get();
+      if (q.docs.isEmpty) return null;
+      final doc = q.docs.first;
+      return (doc.data() ?? {}) as Map<String, dynamic>;
+    } catch (e) {
+      print('❌ Error loading last measurement: $e');
+      return null;
+    }
+  }
 
   // Fetch semua food items dari Firestore
   Future<List<FoodItem>> getAllFoodItems() async {
@@ -76,9 +201,9 @@ class FirestoreService {
       QuerySnapshot snapshot = await _db.collection('makanan').get();
 
       // Simpan ke cache
-      _cachedFoodItems = snapshot.docs.map((doc) => FoodItem.fromFirestore(doc)).toList();
+      _cachedFoodItems =
+          snapshot.docs.map((doc) => FoodItem.fromFirestore(doc)).toList();
       return _cachedFoodItems!;
-
     } catch (e) {
       print("Error fetching all food items: $e");
       return [];
@@ -88,12 +213,12 @@ class FirestoreService {
   // Fetch food items by category for swapping
   Future<List<FoodItem>> getFoodCandidates(String category) async {
     final allFoods = await getAllFoodItems();
-    
+
     // Filter di aplikasi (bukan di database) supaya hemat read
     // Cari yang kategorinya sama
-    return allFoods.where((item) => 
-      item.kategori.toLowerCase() == category.toLowerCase()
-    ).toList();
+    return allFoods
+        .where((item) => item.kategori.toLowerCase() == category.toLowerCase())
+        .toList();
   }
 
   // Group and filter foods to build balanced menus
@@ -118,7 +243,7 @@ class FirestoreService {
       if (isBanned) {
         return false; // Membuang item yang termasuk di daftar blacklist
       }
-      
+
       // Keep only edible items: Matang / Olahan, Mentah (Lauk), or Buah/Minuman
       return kond == 'matang' ||
           kond == 'olahan' ||
@@ -186,7 +311,8 @@ class FirestoreService {
 
   // Generate balanced meal plan with SMART SORTING based on Macros
   // Parameter 'ratios' ditambahkan (opsional) untuk prioritas nutrisi
-  Future<List<FoodItem>> generateMealPlan(int targetCalories, {Map<String, double>? ratios}) async {
+  Future<List<FoodItem>> generateMealPlan(int targetCalories,
+      {Map<String, double>? ratios}) async {
     final cats = await getBalancedFoods();
     final karbo = cats['karbo'] ?? [];
     final lauk = cats['protein'] ?? [];
@@ -205,7 +331,7 @@ class FirestoreService {
     int tolerance = 50;
 
     // TAHAP 1: CARI KANDIDAT BERDASARKAN KALORI (Brute Force)
-    
+
     // A. Coba Kombinasi 3 Item (Karbo + Lauk + Sayur)
     if (sayur.isNotEmpty) {
       for (var k in karbo) {
@@ -259,12 +385,11 @@ class FirestoreService {
     // TAHAP 2: SMART SORTING & PEMILIHAN PEMENANG
 
     if (candidates.isNotEmpty) {
-      
       // JIKA ADA RASIO (User memilih preferensi makro)
       // Kita urutkan kandidat berdasarkan prioritas nutrisi tersebut
       if (ratios != null) {
         String priority = 'balanced';
-        
+
         // Tentukan prioritas berdasarkan persentase
         if ((ratios['protein'] ?? 0) >= 0.30) {
           priority = 'protein'; // High Protein Diet
@@ -277,38 +402,42 @@ class FirestoreService {
         // Sorting Logika: Urutkan kandidat dari yang nutrisinya paling tinggi
         candidates.sort((a, b) {
           // Hitung total nutrisi paket A
-          double proteinA = a.fold(0, (sum, item) => sum + item.protein.toDouble());
+          double proteinA =
+              a.fold(0, (sum, item) => sum + item.protein.toDouble());
           double fatA = a.fold(0, (sum, item) => sum + item.fat.toDouble());
           double carbsA = a.fold(0, (sum, item) => sum + item.carbs.toDouble());
 
           // Hitung total nutrisi paket B
-          double proteinB = b.fold(0, (sum, item) => sum + item.protein.toDouble());
+          double proteinB =
+              b.fold(0, (sum, item) => sum + item.protein.toDouble());
           double fatB = b.fold(0, (sum, item) => sum + item.fat.toDouble());
           double carbsB = b.fold(0, (sum, item) => sum + item.carbs.toDouble());
 
-          
-
           // Bandingkan berdasarkan prioritas user
-          if (priority == 'protein') return proteinB.compareTo(proteinA); // Protein tertinggi di atas
-          if (priority == 'fat') return fatB.compareTo(fatA);             // Lemak tertinggi di atas
-          if (priority == 'carbs') return carbsB.compareTo(carbsA);       // Karbo tertinggi di atas
-          
+          if (priority == 'protein')
+            return proteinB.compareTo(proteinA); // Protein tertinggi di atas
+          if (priority == 'fat')
+            return fatB.compareTo(fatA); // Lemak tertinggi di atas
+          if (priority == 'carbs')
+            return carbsB.compareTo(carbsA); // Karbo tertinggi di atas
+
           return 0; // Kalau balanced, biarkan urutan acak
         });
 
         // Ambil Top 5 Terbaik, lalu acak sedikit biar variatif
         // Tujuannya supaya user tidak bosan dikasih menu nomor 1 terus
         int takeCount = candidates.length > 5 ? 5 : candidates.length;
-        List<List<FoodItem>> topCandidates = candidates.take(takeCount).toList();
-        
+        List<List<FoodItem>> topCandidates =
+            candidates.take(takeCount).toList();
+
         return topCandidates[_random.nextInt(topCandidates.length)];
       }
 
       // JIKA TIDAK ADA RASIO (Default)
       // Pilih secara ACAK murni dari semua kandidat yang lolos toleransi kalori
       return candidates[_random.nextInt(candidates.length)];
-    } 
-    
+    }
+
     // TAHAP 3: FALLBACK (Jika tidak ada kandidat yang pas toleransi)
     else {
       // Pakai yang terbaik absolut (selisih terkecil)

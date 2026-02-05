@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/calculator_service.dart';
 import '../services/local_storage_service.dart';
+import '../services/firestore_service.dart';
 import '../auth/auth_service.dart';
 import 'results_screen.dart';
+import '../widgets/profile_summary.dart';
 
 class InputFormScreen extends StatefulWidget {
   const InputFormScreen({super.key});
@@ -15,9 +19,11 @@ class InputFormScreen extends StatefulWidget {
 class _InputFormScreenState extends State<InputFormScreen> {
   final _formKey = GlobalKey<FormState>();
   final _weightController = TextEditingController();
+  final FocusNode _weightFocusNode = FocusNode();
   final _heightController = TextEditingController();
   final _ageController = TextEditingController();
-  final LocalStorageService _localStorageService =  LocalStorageService(); // service penyimpanan Local Storage
+  final LocalStorageService _localStorageService =
+      LocalStorageService(); // service penyimpanan Local Storage
   final AuthService _authService = AuthService();
 
   Gender? _selectedGender;
@@ -33,23 +39,62 @@ class _InputFormScreenState extends State<InputFormScreen> {
   // Fungsi untuk memuat data dari memori HP ke Form
   Future<void> _loadUserData() async {
     final data = await _localStorageService.loadDataUser();
-    
+
+    bool hasLocal = (data['berat'] ?? '').isNotEmpty;
+
+    // If local exists, use it. Otherwise try Firestore fallback once.
+    Map<String, String> finalData = Map<String, String>.from(data);
+
+    if (!hasLocal) {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final fs = FirestoreService();
+        final profile = await fs.loadUserProfile(user.uid);
+        if (profile != null) {
+          // Map firestore numeric values to string for controllers/local save
+          finalData['berat'] = (profile['weightKg'] != null)
+              ? profile['weightKg'].toString()
+              : '';
+          finalData['tinggi'] = (profile['heightCm'] != null)
+              ? profile['heightCm'].toString()
+              : '';
+          finalData['usia'] =
+              (profile['age'] != null) ? profile['age'].toString() : '';
+          finalData['gender'] = (profile['gender'] != null)
+              ? profile['gender'].toString()
+              : 'Laki - Laki';
+          finalData['aktivitas'] = (profile['activityLevel'] != null)
+              ? profile['activityLevel'].toString()
+              : 'Ringan';
+
+          // Cache to local so subsequent launches won't hit Firestore
+          await _localStorageService.simpanDataUser(
+            berat: finalData['berat']!,
+            tinggi: finalData['tinggi']!,
+            usia: finalData['usia']!,
+            gender: finalData['gender']!,
+            aktivitas: finalData['aktivitas']!,
+          );
+        }
+      }
+    }
+
     if (mounted) {
       setState(() {
         // Isi Text Controllers
-        _weightController.text = data['berat'] ?? '';
-        _heightController.text = data['tinggi'] ?? '';
-        _ageController.text = data['usia'] ?? '';
+        _weightController.text = finalData['berat'] ?? '';
+        _heightController.text = finalData['tinggi'] ?? '';
+        _ageController.text = finalData['usia'] ?? '';
 
         // Isi Dropdown Gender (Konversi String -> Enum)
-        if (data['gender'] == 'Laki - Laki') {
+        if (finalData['gender'] == 'Laki - Laki') {
           _selectedGender = Gender.male;
-        } else if (data['gender'] == 'Perempuan') {
+        } else if (finalData['gender'] == 'Perempuan') {
           _selectedGender = Gender.female;
         }
 
         // Isi Dropdown Aktivitas (Konversi String -> Enum)
-        String activityStr = data['aktivitas'] ?? 'Sedang';
+        String activityStr = finalData['aktivitas'] ?? 'Sedang';
         switch (activityStr) {
           case 'Tidak Bergerak Banyak':
             _selectedActivityLevel = ActivityLevel.sedentary;
@@ -75,6 +120,7 @@ class _InputFormScreenState extends State<InputFormScreen> {
 
   @override
   void dispose() {
+    _weightFocusNode.dispose();
     _weightController.dispose();
     _heightController.dispose();
     _ageController.dispose();
@@ -83,25 +129,44 @@ class _InputFormScreenState extends State<InputFormScreen> {
 
   void _calculate() {
     if (_formKey.currentState!.validate()) {
-
       // 2. Simpan Data ke HP sebelum pindah halaman
       // Kita harus ubah Enum kembali ke String biar bisa disimpan
-      String genderStr = _selectedGender == Gender.male ? 'Laki - Laki' : 'Perempuan';
+      String genderStr =
+          _selectedGender == Gender.male ? 'Laki - Laki' : 'Perempuan';
 
       String activityStr = 'Ringan';
       switch (_selectedActivityLevel!) {
-        case ActivityLevel.sedentary: activityStr = 'Tidak Bergerak Banyak'; break;
-        case ActivityLevel.light: activityStr = 'Ringan'; break;
-        case ActivityLevel.moderate: activityStr = 'Sedang'; break;
-        case ActivityLevel.active: activityStr = 'Aktif'; break;
-        case ActivityLevel.veryActive: activityStr = 'Sangat Aktif'; break;
+        case ActivityLevel.sedentary:
+          activityStr = 'Tidak Bergerak Banyak';
+          break;
+        case ActivityLevel.light:
+          activityStr = 'Ringan';
+          break;
+        case ActivityLevel.moderate:
+          activityStr = 'Sedang';
+          break;
+        case ActivityLevel.active:
+          activityStr = 'Aktif';
+          break;
+        case ActivityLevel.veryActive:
+          activityStr = 'Sangat Aktif';
+          break;
       }
 
-      // Eksekusi Simpan
+      // Eksekusi Simpan ke Local Storage
       _localStorageService.simpanDataUser(
         berat: _weightController.text,
         tinggi: _heightController.text,
         usia: _ageController.text,
+        gender: genderStr,
+        aktivitas: activityStr,
+      );
+
+      // Simpan Profile ke Firestore (async, tidak blocking)
+      _saveProfileToFirestore(
+        berat: double.parse(_weightController.text),
+        tinggi: double.parse(_heightController.text),
+        usia: int.parse(_ageController.text),
         gender: genderStr,
         aktivitas: activityStr,
       );
@@ -124,15 +189,55 @@ class _InputFormScreenState extends State<InputFormScreen> {
     }
   }
 
+  // Fungsi untuk menyimpan profile ke Firestore
+  Future<void> _saveProfileToFirestore({
+    required double berat,
+    required double tinggi,
+    required int usia,
+    required String gender,
+    required String aktivitas,
+  }) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        debugPrint('❌ User tidak terautentikasi');
+        return;
+      }
+
+      final uid = user.uid;
+      final now = Timestamp.now();
+
+      // Simpan ke /users/{uid}
+      await FirebaseFirestore.instance.collection('users').doc(uid).set({
+        'email': user.email,
+        'nama': user.displayName ?? 'User',
+        'heightCm': tinggi, // number type
+        'weightKg': berat, // number type
+        'age': usia, // number type
+        'gender': gender,
+        'activityLevel': aktivitas,
+        'updatedAt': now,
+        'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true)); // merge: true = update existing fields
+
+      debugPrint('✅ Profile disimpan ke Firestore (UID: $uid)');
+    } catch (e) {
+      debugPrint('❌ Error simpan ke Firestore: $e');
+    }
+  }
+
   Future<void> _logout() async {
     try {
       await _localStorageService.hapusDataUser();
       await _authService.signOut();
       if (mounted) {
-        Navigator.of(context).pushNamedAndRemoveUntil('/welcome', (route) => false);
+        Navigator.of(context)
+            .pushNamedAndRemoveUntil('/welcome', (route) => false);
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Logout error: $e')));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Logout error: $e')));
     }
   }
 
@@ -143,7 +248,9 @@ class _InputFormScreenState extends State<InputFormScreen> {
         title: const Text('Logout'),
         content: const Text('Apakah Anda yakin ingin logout?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal')),
           TextButton(
             onPressed: () {
               Navigator.pop(context);
@@ -170,8 +277,11 @@ class _InputFormScreenState extends State<InputFormScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              ProfileSummary(onEdit: () => _weightFocusNode.requestFocus()),
+              const SizedBox(height: 8),
               TextFormField(
                 controller: _weightController,
+                focusNode: _weightFocusNode,
                 decoration: const InputDecoration(
                   labelText: 'Berat (kg)',
                   border: OutlineInputBorder(),
@@ -179,7 +289,7 @@ class _InputFormScreenState extends State<InputFormScreen> {
                 keyboardType: TextInputType.number,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 validator: (value) =>
-                value!.isEmpty ? 'Mohon masukkan berat badan' : null,
+                    value!.isEmpty ? 'Mohon masukkan berat badan' : null,
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -191,7 +301,7 @@ class _InputFormScreenState extends State<InputFormScreen> {
                 keyboardType: TextInputType.number,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 validator: (value) =>
-                value!.isEmpty ? 'Mohon masukkan tinggi badan' : null,
+                    value!.isEmpty ? 'Mohon masukkan tinggi badan' : null,
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -203,7 +313,7 @@ class _InputFormScreenState extends State<InputFormScreen> {
                 keyboardType: TextInputType.number,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 validator: (value) =>
-                value!.isEmpty ? 'Mohon masukkan umur' : null,
+                    value!.isEmpty ? 'Mohon masukkan umur' : null,
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<Gender>(
@@ -213,12 +323,14 @@ class _InputFormScreenState extends State<InputFormScreen> {
                   border: OutlineInputBorder(),
                 ),
                 items: const [
-                  DropdownMenuItem(value: Gender.male, child: Text('Laki-Laki')),
-                  DropdownMenuItem(value: Gender.female, child: Text('Perempuan')),
+                  DropdownMenuItem(
+                      value: Gender.male, child: Text('Laki-Laki')),
+                  DropdownMenuItem(
+                      value: Gender.female, child: Text('Perempuan')),
                 ],
                 onChanged: (value) => setState(() => _selectedGender = value),
                 validator: (value) =>
-                value == null ? 'Mohon pilih jenis kelamin' : null,
+                    value == null ? 'Mohon pilih jenis kelamin' : null,
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<ActivityLevel>(
@@ -228,15 +340,23 @@ class _InputFormScreenState extends State<InputFormScreen> {
                   border: OutlineInputBorder(),
                 ),
                 items: const [
-                  DropdownMenuItem(value: ActivityLevel.sedentary, child: Text('Tidak Bergerak Banyak')),
-                  DropdownMenuItem(value: ActivityLevel.light, child: Text('Ringan')),
-                  DropdownMenuItem(value: ActivityLevel.moderate, child: Text('Sedang')),
-                  DropdownMenuItem(value: ActivityLevel.active, child: Text('Aktif')),
-                  DropdownMenuItem(value: ActivityLevel.veryActive, child: Text('Sangat Aktif')),
+                  DropdownMenuItem(
+                      value: ActivityLevel.sedentary,
+                      child: Text('Tidak Bergerak Banyak')),
+                  DropdownMenuItem(
+                      value: ActivityLevel.light, child: Text('Ringan')),
+                  DropdownMenuItem(
+                      value: ActivityLevel.moderate, child: Text('Sedang')),
+                  DropdownMenuItem(
+                      value: ActivityLevel.active, child: Text('Aktif')),
+                  DropdownMenuItem(
+                      value: ActivityLevel.veryActive,
+                      child: Text('Sangat Aktif')),
                 ],
-                onChanged: (value) => setState(() => _selectedActivityLevel = value),
+                onChanged: (value) =>
+                    setState(() => _selectedActivityLevel = value),
                 validator: (value) =>
-                value == null ? 'Mohon pilih level aktivitas' : null,
+                    value == null ? 'Mohon pilih level aktivitas' : null,
               ),
               const SizedBox(height: 32),
               ElevatedButton.icon(

@@ -1,5 +1,3 @@
-import 'dart:math';
-
 enum Gender { male, female }
 
 enum ActivityLevel { sedentary, light, moderate, active, veryActive }

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../services/macro_nutrient.dart';
+import '../services/firestore_service.dart';
+import '../services/local_storage_service.dart';
 
 class MacroCustomizationScreen extends StatefulWidget {
   final int tdee;
@@ -25,6 +28,8 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
   String? _errorMessage;
   String? _warningMessage;
   bool _showWarning = false;
+  final FirestoreService _firestoreService = FirestoreService();
+  final LocalStorageService _localStorage = LocalStorageService();
 
   @override
   void initState() {
@@ -37,6 +42,44 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
     _fatCtl = TextEditingController(
         text: MacroNutrient.balanced.fatPercent.toStringAsFixed(0));
     _updateMacro();
+    _loadPreferences();
+  }
+
+  Future<void> _loadPreferences() async {
+    // 1) Try local cache first (very cheap)
+    final local = await _localStorage.loadMacroPreferencesLocal();
+    if (local != null && local.isNotEmpty) {
+      final c = local['carbPercent'] ?? local['carb'] ?? 0.0;
+      final p = local['proteinPercent'] ?? local['protein'] ?? 0.0;
+      final f = local['fatPercent'] ?? local['fat'] ?? 0.0;
+      _carbCtl.text = c.toStringAsFixed(0);
+      _proteinCtl.text = p.toStringAsFixed(0);
+      _fatCtl.text = f.toStringAsFixed(0);
+      _updateMacro();
+      return;
+    }
+
+    // 2) If not in local, try Firestore (single read)
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      try {
+        final remote = await _firestoreService.loadMacroPreferences(uid);
+        if (remote != null) {
+          _carbCtl.text = remote.carbPercent.toStringAsFixed(0);
+          _proteinCtl.text = remote.proteinPercent.toStringAsFixed(0);
+          _fatCtl.text = remote.fatPercent.toStringAsFixed(0);
+          _updateMacro();
+          // Save to local for faster next load
+          await _localStorage.saveMacroPreferencesLocal(
+            carbPercent: remote.carbPercent,
+            proteinPercent: remote.proteinPercent,
+            fatPercent: remote.fatPercent,
+          );
+        }
+      } catch (e) {
+        debugPrint('❌ Error loading remote macro prefs: $e');
+      }
+    }
   }
 
   @override
@@ -78,7 +121,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
     setState(() {});
   }
 
-  void _save() {
+  Future<void> _save() async {
     _updateMacro();
 
     if (_errorMessage != null) {
@@ -91,9 +134,37 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
       return;
     }
 
+    // Simpan ke Firestore sebelum close dialog (jangan lupa cache lokal)
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null && _currentMacro != null) {
+        await _firestoreService.saveMacroPreferences(
+          uid: uid,
+          carbPercent: _currentMacro!.carbPercent,
+          proteinPercent: _currentMacro!.proteinPercent,
+          fatPercent: _currentMacro!.fatPercent,
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error saving macro preferences: $e');
+    }
+
+    // Simpan juga ke cache lokal agar tidak perlu read saat app restart
+    try {
+      if (_currentMacro != null) {
+        await _localStorage.saveMacroPreferencesLocal(
+          carbPercent: _currentMacro!.carbPercent,
+          proteinPercent: _currentMacro!.proteinPercent,
+          fatPercent: _currentMacro!.fatPercent,
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error saving local macro prefs: $e');
+    }
+
     // Even if warning, save (user acknowledge)
     widget.onSave(_currentMacro!);
-    Navigator.pop(context);
+    if (mounted) Navigator.pop(context);
   }
 
   void _setPreset(double carb, double protein, double fat) {
@@ -204,11 +275,14 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text("Total Persentase:", style: TextStyle(color: Colors.green)),
+                    const Text("Total Persentase:",
+                        style: TextStyle(color: Colors.green)),
                     Text(
                       '${((double.tryParse(_carbCtl.text) ?? 0) + (double.tryParse(_proteinCtl.text) ?? 0) + (double.tryParse(_fatCtl.text) ?? 0)).toStringAsFixed(0)}%',
                       style: const TextStyle(
-                          color: Colors.green, fontWeight: FontWeight.bold, fontSize: 18),
+                          color: Colors.green,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18),
                     ),
                   ],
                 ),
@@ -229,7 +303,8 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
                   children: [
                     const Row(
                       children: [
-                        Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 20),
+                        Icon(Icons.warning_amber_rounded,
+                            color: Colors.orange, size: 20),
                         SizedBox(width: 8),
                         Text(
                           'Perhatian (Standar Kesehatan)',
@@ -271,16 +346,17 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
                     ),
                     child: const Column(
                       children: [
-                        Text('Seimbang', style: TextStyle(fontWeight: FontWeight.bold)),
-                        Text('(WHO Standard)\n60-15-25', 
-                             textAlign: TextAlign.center, 
-                             style: TextStyle(fontSize: 10, color: Colors.grey)),
+                        Text('Seimbang',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text('(WHO Standard)\n60-15-25',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 10, color: Colors.grey)),
                       ],
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
-                
+
                 // 2. Tombol High Protein (Atlet)
                 Expanded(
                   child: OutlinedButton(
@@ -290,10 +366,11 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
                     ),
                     child: const Column(
                       children: [
-                        Text('Atlet', style: TextStyle(fontWeight: FontWeight.bold)),
-                        Text('(High Protein)\n50-30-20', 
-                             textAlign: TextAlign.center, 
-                             style: TextStyle(fontSize: 10, color: Colors.grey)),
+                        Text('Atlet',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text('(High Protein)\n50-30-20',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 10, color: Colors.grey)),
                       ],
                     ),
                   ),
@@ -309,10 +386,11 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
                     ),
                     child: const Column(
                       children: [
-                        Text('Low Fat', style: TextStyle(fontWeight: FontWeight.bold)),
-                        Text('(Cegah Obesitas)\n70-15-15', 
-                             textAlign: TextAlign.center, 
-                             style: TextStyle(fontSize: 10, color: Colors.grey)),
+                        Text('Low Fat',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text('(Cegah Obesitas)\n70-15-15',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 10, color: Colors.grey)),
                       ],
                     ),
                   ),
@@ -333,13 +411,16 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
               width: double.infinity,
               child: ElevatedButton.icon(
                 icon: const Icon(Icons.check_circle, color: Colors.white),
-                label: const Text('SIMPAN PREFERENSI', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                label: const Text('SIMPAN PREFERENSI',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold)),
                 onPressed: _errorMessage == null ? _save : null,
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   backgroundColor:
                       _errorMessage == null ? Colors.green : Colors.grey,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                 ),
               ),
             ),
@@ -368,8 +449,8 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
           borderSide: BorderSide(color: color),
         ),
         enabledBorder: OutlineInputBorder(
-           borderRadius: BorderRadius.circular(8),
-           borderSide: BorderSide(color: color.withOpacity(0.5)),
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: color.withOpacity(0.5)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
@@ -445,7 +526,10 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
           children: [
             Text(
               label,
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey[700]),
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[700]),
               maxLines: 1,
             ),
             const SizedBox(height: 8),
@@ -456,7 +540,10 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
             ),
             Text(
               '${grams.toStringAsFixed(0)}g',
-              style: const TextStyle(fontSize: 14, color: Colors.black87, fontWeight: FontWeight.w500),
+              style: const TextStyle(
+                  fontSize: 14,
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w500),
             ),
           ],
         ),

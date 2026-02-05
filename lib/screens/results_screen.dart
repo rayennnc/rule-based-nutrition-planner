@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/calculator_service.dart';
 import '../services/firestore_service.dart';
 import '../services/macro_nutrient.dart'; // add import
@@ -30,6 +31,10 @@ class _ResultsScreenState extends State<ResultsScreen> {
   // Key untuk mengrefresh Menu
   int _refreshKey = 0;
 
+  // Last measurement cache
+  Map<String, dynamic>? _lastMeasurement;
+  bool _loadingLastMeasurement = true;
+
   final FirestoreService _firestoreService = FirestoreService();
   final AuthService _authService = AuthService(); // add this
   final LocalStorageService _storageService = LocalStorageService();
@@ -40,6 +45,23 @@ class _ResultsScreenState extends State<ResultsScreen> {
     _bmi = widget.calculator.calculateBmi();
     _bmiCategory = widget.calculator.getBmiCategory(_bmi);
     _tdee = widget.calculator.calculateTdee();
+    _loadLastMeasurement();
+  }
+
+  Future<void> _loadLastMeasurement() async {
+    setState(() => _loadingLastMeasurement = true);
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      setState(() => _loadingLastMeasurement = false);
+      return;
+    }
+    final data = await _firestoreService.loadLastMeasurement(uid);
+    if (mounted) {
+      setState(() {
+        _lastMeasurement = data;
+        _loadingLastMeasurement = false;
+      });
+    }
   }
 
   void _setDietGoal(DietGoal goal) {
@@ -48,6 +70,30 @@ class _ResultsScreenState extends State<ResultsScreen> {
       _finalCalories = widget.calculator.getAdjustedCalories(goal, _tdee);
       _selectedMacro = null; // reset macro when changing goal
     });
+
+    // Simpan measurement ke Firestore
+    _saveMeasurementToFirestore(goal);
+  }
+
+  // Simpan measurement (BMI, weight, TDEE, goal) ke Firestore
+  Future<void> _saveMeasurementToFirestore(DietGoal goal) async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+
+      final goalStr =
+          goal.toString().split('.').last; // "lose" / "maintain" / "gain"
+
+      await _firestoreService.saveMeasurement(
+        uid: uid,
+        weight: widget.calculator.weight,
+        bmi: _bmi,
+        tdee: _tdee,
+        goal: goalStr,
+      );
+    } catch (e) {
+      debugPrint('❌ Error in _saveMeasurementToFirestore: $e');
+    }
   }
 
   void _openMacroCustomization() {
@@ -146,7 +192,18 @@ class _ResultsScreenState extends State<ResultsScreen> {
             const SizedBox(height: 16),
             _buildResultCard(
                 'Rekomendasi Kalori Harian (TDEE)', _tdee.toString(), 'Kalori'),
-            const SizedBox(height: 24),
+            const SizedBox(height: 12),
+            if (_loadingLastMeasurement)
+              const Center(
+                  child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 8.0),
+                child: CircularProgressIndicator(),
+              )),
+            if (!_loadingLastMeasurement && _lastMeasurement != null) ...[
+              _buildLastMeasurementCard(),
+              const SizedBox(height: 24),
+            ] else
+              const SizedBox(height: 24),
             if (_selectedGoal == null) _buildGoalSelection(),
             if (_selectedGoal != null && _finalCalories != null) ...[
               if (_selectedMacro == null)
@@ -160,6 +217,57 @@ class _ResultsScreenState extends State<ResultsScreen> {
                 _buildMacroSummary(), // add this widget
               _buildMealPlan(),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLastMeasurementCard() {
+    if (_lastMeasurement == null) return const SizedBox.shrink();
+
+    final weight = _lastMeasurement!['weight']?.toString() ?? '-';
+    final bmi = _lastMeasurement!['bmi']?.toString() ?? '-';
+    final tdee = _lastMeasurement!['tdee']?.toString() ?? '-';
+    final ts = _lastMeasurement!['createdAt'];
+    String dateStr = '';
+    try {
+      if (ts is Timestamp) {
+        dateStr = DateTime.fromMillisecondsSinceEpoch(ts.millisecondsSinceEpoch)
+            .toLocal()
+            .toString();
+      } else if (ts is String) {
+        dateStr = ts;
+      }
+    } catch (_) {
+      dateStr = '';
+    }
+
+    return Card(
+      color: Colors.grey[50],
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Pengukuran Terakhir',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Berat: $weight kg'),
+                    Text('IMT: $bmi'),
+                    Text('TDEE: $tdee kkal'),
+                  ],
+                ),
+                Text(dateStr,
+                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              ],
+            ),
           ],
         ),
       ),
@@ -182,8 +290,8 @@ class _ResultsScreenState extends State<ResultsScreen> {
         _buildGoalButton(
             'Mempertahankan Berat Badan', 'Sesuai TDEE', DietGoal.maintain),
         const SizedBox(height: 12),
-        _buildGoalButton('Menaikkan Berat Badan',
-            'Surplus Kalori 500kal/hari', DietGoal.gain),
+        _buildGoalButton('Menaikkan Berat Badan', 'Surplus Kalori 500kal/hari',
+            DietGoal.gain),
       ],
     );
   }
@@ -258,28 +366,33 @@ class _ResultsScreenState extends State<ResultsScreen> {
             ),
           ],
         ),
-
         const SizedBox(height: 8),
         FutureBuilder<List<FoodItem>>(
           // Panggil generateMealPlan dari firestore_service.dart
-          future: _firestoreService.generateMealPlan(targetCalories, ratios: _selectedMacro != null ? {
-            'protein': _selectedMacro!.proteinPercent / 100,
-            'carbs': _selectedMacro!.carbPercent / 100,
-            'fat': _selectedMacro!.fatPercent / 100,
-          }
-          : null,
+          future: _firestoreService.generateMealPlan(
+            targetCalories,
+            ratios: _selectedMacro != null
+                ? {
+                    'protein': _selectedMacro!.proteinPercent / 100,
+                    'carbs': _selectedMacro!.carbPercent / 100,
+                    'fat': _selectedMacro!.fatPercent / 100,
+                  }
+                : null,
           ),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
             }
-            if (snapshot.hasError || !snapshot.hasData || snapshot.data!.isEmpty) {
+            if (snapshot.hasError ||
+                !snapshot.hasData ||
+                snapshot.data!.isEmpty) {
               return const Center(
                   child: Text('Tidak ada rekomendasi makanan ditemukan.'));
             }
 
             var combination = snapshot.data!;
-            int totalCals = combination.fold<int>(0, (sum, item) => sum + item.calories);
+            int totalCals =
+                combination.fold<int>(0, (sum, item) => sum + item.calories);
             int diff = (targetCalories - totalCals).abs();
 
             return Column(
@@ -288,15 +401,19 @@ class _ResultsScreenState extends State<ResultsScreen> {
                   padding: const EdgeInsets.all(8),
                   width: double.infinity,
                   color: Colors.green.withOpacity(0.1),
-                  child: Text("Total Opsi Ini: $totalCals kkal", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                  child: Text("Total Opsi Ini: $totalCals kkal",
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, color: Colors.green)),
                 ),
                 const SizedBox(height: 8),
-                
+
                 //FITUR UTAMA: MENGGUNAKAN MEAL ITEM CARD (BISA SWAP)
-                ...combination.map((item) => MealItemCard(
-                  foodItem: item,
-                  category: item.kategori,
-                )).toList(),
+                ...combination
+                    .map((item) => MealItemCard(
+                          foodItem: item,
+                          category: item.kategori,
+                        ))
+                    .toList(),
               ],
             );
           },
@@ -347,42 +464,50 @@ class _ResultsScreenState extends State<ResultsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(item.name,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
 
                   // Badge Status
                   Container(
                     margin: const EdgeInsets.symmetric(vertical: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: isMentah ? Colors.orange.withOpacity(0.15) : Colors.blue.withOpacity(0.15),
+                      color: isMentah
+                          ? Colors.orange.withOpacity(0.15)
+                          : Colors.blue.withOpacity(0.15),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
                       isMentah ? "Bahan Mentah" : "Siap Makan",
                       style: TextStyle(
-                        fontSize: 10,
-                        color: isMentah ? Colors.deepOrange : Colors.blue[800],
-                        fontWeight: FontWeight.bold
-                      ),
+                          fontSize: 10,
+                          color:
+                              isMentah ? Colors.deepOrange : Colors.blue[800],
+                          fontWeight: FontWeight.bold),
                     ),
                   ),
 
-                  Text('P: ${item.protein}g | K: ${item.carbs}g | L: ${item.fat}g',
+                  Text(
+                      'P: ${item.protein}g | K: ${item.carbs}g | L: ${item.fat}g',
                       style: const TextStyle(fontSize: 12, color: Colors.grey)),
                 ],
               ),
             ),
-            
+
             // Kalori
             Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text('${item.calories}',
-                    style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 16)),
-                  const Text('kkal',
-                      style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    style: const TextStyle(
+                        color: Colors.green,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16)),
+                const Text('kkal',
+                    style: TextStyle(fontSize: 12, color: Colors.grey)),
               ],
             ),
           ],
@@ -415,12 +540,15 @@ class _ResultsScreenState extends State<ResultsScreen> {
                 children: [
                   Center(
                     child: Container(
-                      width: 40, height: 5,
-                      decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10)),
+                      width: 40,
+                      height: 5,
+                      decoration: BoxDecoration(
+                          color: Colors.grey[300],
+                          borderRadius: BorderRadius.circular(10)),
                     ),
                   ),
                   const SizedBox(height: 20),
-                  
+
                   // Gambar Besar
                   Center(
                     child: Container(
@@ -433,17 +561,21 @@ class _ResultsScreenState extends State<ResultsScreen> {
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(15),
                         child: item.imageUrl != null
-                          ? _buildImageWidget(item.imageUrl!)
-                          : const Icon(Icons.fastfood, size: 80, color: Colors.grey),
+                            ? _buildImageWidget(item.imageUrl!)
+                            : const Icon(Icons.fastfood,
+                                size: 80, color: Colors.grey),
                       ),
                     ),
                   ),
                   const SizedBox(height: 20),
 
                   // Judul
-                  Text(item.name, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                  Text(item.name,
+                      style: const TextStyle(
+                          fontSize: 24, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center),
                   const SizedBox(height: 8),
-                  
+
                   // Badges
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -456,27 +588,34 @@ class _ResultsScreenState extends State<ResultsScreen> {
                       const SizedBox(width: 10),
                       Chip(
                         label: Text(item.kondisi),
-                        backgroundColor: item.kondisi.toLowerCase() == 'mentah' 
-                            ? Colors.orange.withOpacity(0.1) 
+                        backgroundColor: item.kondisi.toLowerCase() == 'mentah'
+                            ? Colors.orange.withOpacity(0.1)
                             : Colors.blue.withOpacity(0.1),
                         labelStyle: TextStyle(
-                            color: item.kondisi.toLowerCase() == 'mentah' ? Colors.deepOrange : Colors.blue[800]
-                        ),
+                            color: item.kondisi.toLowerCase() == 'mentah'
+                                ? Colors.deepOrange
+                                : Colors.blue[800]),
                       ),
                     ],
                   ),
                   const SizedBox(height: 20),
 
                   // Info Gizi Grid
-                  const Text("Informasi Nilai Gizi (per 100g)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  const Text("Informasi Nilai Gizi (per 100g)",
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 10),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      _buildNutrientBox("Kalori", "${item.calories}", "kkal", Colors.redAccent),
-                      _buildNutrientBox("Protein", "${item.protein}", "g", Colors.blueAccent),
-                      _buildNutrientBox("Karbo", "${item.carbs}", "g", Colors.orange),
-                      _buildNutrientBox("Lemak", "${item.fat}", "g", Colors.amber[700]!),
+                      _buildNutrientBox("Kalori", "${item.calories}", "kkal",
+                          Colors.redAccent),
+                      _buildNutrientBox(
+                          "Protein", "${item.protein}", "g", Colors.blueAccent),
+                      _buildNutrientBox(
+                          "Karbo", "${item.carbs}", "g", Colors.orange),
+                      _buildNutrientBox(
+                          "Lemak", "${item.fat}", "g", Colors.amber[700]!),
                     ],
                   ),
                   const SizedBox(height: 20),
@@ -497,9 +636,10 @@ class _ResultsScreenState extends State<ResultsScreen> {
                         Expanded(
                           child: Text(
                             item.kondisi.toLowerCase() == 'mentah'
-                              ? "Perhatian: Ini adalah berat bahan MENTAH. Pastikan Anda menimbang bahan ini sebanyak 100g sebelum dimasak untuk mendapatkan kalori yang akurat."
-                              : "Makanan ini siap santap. Nikmati sesuai porsi yang dianjurkan.",
-                            style: const TextStyle(fontSize: 13, color: Colors.black87),
+                                ? "Perhatian: Ini adalah berat bahan MENTAH. Pastikan Anda menimbang bahan ini sebanyak 100g sebelum dimasak untuk mendapatkan kalori yang akurat."
+                                : "Makanan ini siap santap. Nikmati sesuai porsi yang dianjurkan.",
+                            style: const TextStyle(
+                                fontSize: 13, color: Colors.black87),
                           ),
                         ),
                       ],
@@ -520,7 +660,8 @@ class _ResultsScreenState extends State<ResultsScreen> {
   }
 
   // Nutrient Info Box
-  Widget _buildNutrientBox(String label, String value, String unit, Color color) {
+  Widget _buildNutrientBox(
+      String label, String value, String unit, Color color) {
     return Column(
       children: [
         Container(
@@ -529,7 +670,9 @@ class _ResultsScreenState extends State<ResultsScreen> {
             color: color.withOpacity(0.1),
             shape: BoxShape.circle,
           ),
-          child: Text(value, style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 16)),
+          child: Text(value,
+              style: TextStyle(
+                  fontWeight: FontWeight.bold, color: color, fontSize: 16)),
         ),
         const SizedBox(height: 4),
         Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
