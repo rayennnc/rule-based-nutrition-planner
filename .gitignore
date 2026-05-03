@@ -41,3 +41,11 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# folder foto
+
+# folder coverage
+/coverage/
+
+# folder dan file skripsi
+/skripsi/

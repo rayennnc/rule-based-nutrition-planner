@@ -174,8 +174,8 @@ class _InputFormScreenState extends State<InputFormScreen> {
       // Logika Perhitungan
       final calculator = CalculatorService(
         gender: _selectedGender!,
-        weight: double.parse(_weightController.text),
-        height: double.parse(_heightController.text),
+        weight: double.parse(_weightController.text.replaceAll(',', '.')),
+        height: double.parse(_heightController.text.replaceAll(',', '.')),
         age: int.parse(_ageController.text),
         activityLevel: _selectedActivityLevel!,
       );
@@ -263,6 +263,136 @@ class _InputFormScreenState extends State<InputFormScreen> {
     );
   }
 
+  // Tabel penjelasan level aktivitas
+  Widget _buildActivityLevelExplanation() {
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Penjelasan Level Aktivitas',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Column(
+              children: [
+                // Header
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade100,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(4),
+                      topRight: Radius.circular(4),
+                    ),
+                  ),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                  child: const Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Text('Level',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 12)),
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        flex: 3,
+                        child: Text('Penjelasan',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 12)),
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        flex: 1,
+                        child: Text('Faktor',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 12)),
+                      ),
+                    ],
+                  ),
+                ),
+                // Rows
+                _ActivityRow(
+                    level: 'Tidak Bergerak',
+                    desc: 'Jarang olahraga, duduk seharian',
+                    factor: '1.2x'),
+                _ActivityRow(
+                    level: 'Ringan',
+                    desc: 'Olahraga 1-3 hari/minggu',
+                    factor: '1.375x'),
+                _ActivityRow(
+                    level: 'Sedang',
+                    desc: 'Olahraga 3-5 hari/minggu',
+                    factor: '1.55x'),
+                _ActivityRow(
+                    level: 'Aktif',
+                    desc: 'Olahraga intensif 6-7 hari/minggu',
+                    factor: '1.725x'),
+                _ActivityRow(
+                    level: 'Sangat Aktif',
+                    desc: 'Atlet profesional, 2x latihan/hari',
+                    factor: '1.9x'),
+              ],
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Catatan: Faktor × BMR = TDEE (kebutuhan kalori harian)',
+              style: TextStyle(
+                  fontSize: 10,
+                  fontStyle: FontStyle.italic,
+                  color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _ActivityRow({
+    required String level,
+    required String desc,
+    required String factor,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        border:
+            Border(bottom: BorderSide(color: Colors.grey.shade200, width: 1)),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text(level,
+                style:
+                    const TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 3,
+            child: Text(desc,
+                style: const TextStyle(fontSize: 10),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 1,
+            child: Text(factor,
+                style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.green)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -286,10 +416,17 @@ class _InputFormScreenState extends State<InputFormScreen> {
                   labelText: 'Berat (kg)',
                   border: OutlineInputBorder(),
                 ),
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                validator: (value) =>
-                    value!.isEmpty ? 'Mohon masukkan berat badan' : null,
+                keyboardType: TextInputType.numberWithOptions(decimal: true),
+                validator: (value) {
+                  if (value == null || value.isEmpty) return 'Mohon masukkan berat badan';
+
+                  String valStr = value.replaceAll(',', '.'); // Ganti koma dengan titik
+                  final weight = double.tryParse(valStr);
+                  if (weight == null || weight <= 0 || weight > 300) {
+                    return 'Berat badan tidak valid (1 - 300 kg)';
+                    }
+                  return null;
+                  },
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -298,10 +435,18 @@ class _InputFormScreenState extends State<InputFormScreen> {
                   labelText: 'Tinggi (cm)',
                   border: OutlineInputBorder(),
                 ),
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                validator: (value) =>
-                    value!.isEmpty ? 'Mohon masukkan tinggi badan' : null,
+                keyboardType: TextInputType.numberWithOptions(decimal: true),
+                validator: (value) {
+                  if (value == null || value.isEmpty) return 'Mohon masukkan tinggi badan';
+                  
+                  String valStr = value.replaceAll(',', '.');
+                  final height = double.tryParse(valStr); // Pakai double
+                  
+                  if (height == null || height < 50 || height > 250) {
+                    return 'Tinggi badan tidak valid (50–250 cm)';
+                    }
+                    return null;
+                    },
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -312,8 +457,15 @@ class _InputFormScreenState extends State<InputFormScreen> {
                 ),
                 keyboardType: TextInputType.number,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                validator: (value) =>
-                    value!.isEmpty ? 'Mohon masukkan umur' : null,
+                validator: (value) {
+                  if (value == null || value.isEmpty) return 'Mohon masukkan umur';
+                  final age = int.tryParse(value);
+                  if (age == null || age < 18 || age > 75) {
+                    return 'Umur tidak valid (18-75 tahun)';
+                    }
+                    return null;
+                },
+                    
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<Gender>(
@@ -358,6 +510,8 @@ class _InputFormScreenState extends State<InputFormScreen> {
                 validator: (value) =>
                     value == null ? 'Mohon pilih level aktivitas' : null,
               ),
+              const SizedBox(height: 20),
+              _buildActivityLevelExplanation(),
               const SizedBox(height: 32),
               ElevatedButton.icon(
                 icon: const Icon(Icons.calculate),

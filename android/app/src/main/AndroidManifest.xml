@@ -42,4 +42,8 @@
             <data android:mimeType="text/plain"/>
         </intent>
     </queries>
+
+    <!-- Internet permissions untuk loading gambar & Firebase -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 </manifest>

@@ -41,12 +41,14 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     String category;
     if (rounded < 18.5) {
       category = 'Kurus (Underweight)';
-    } else if (rounded >= 18.5 && rounded <= 24.9) {
+    } else if (rounded >= 18.5 && rounded <= 22.9) {
       category = 'Normal';
-    } else if (rounded >= 25.0 && rounded <= 29.9) {
+    } else if (rounded >= 23.0 && rounded <= 24.9) {
       category = 'Overweight';
+    } else if (rounded >= 25.0 && rounded <= 29.9) {
+      category = 'Obesitas Kelas 1';
     } else {
-      category = 'Obesitas';
+      category = 'Obesitas Kelas 2';
     }
 
     setState(() {
@@ -57,10 +59,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   Color _resultColor() {
     if (_bmi == null) return Colors.grey.shade100;
+
     if (_bmi! < 18.5) return Colors.blue.shade50;
-    if (_bmi! < 25.0) return Colors.green.shade50;
-    if (_bmi! < 30.0) return Colors.amber.shade50;
-    return Colors.red.shade50;
+    if (_bmi! < 23.0) return Colors.green.shade50;
+    if (_bmi! < 25.0) return Colors.amber.shade100;
+    if (_bmi! < 30.0) return Colors.orange.shade200;
+    return Colors.red.shade100;
   }
 
   String _categoryAdvice() {
@@ -189,8 +193,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                         validator: (v) {
                           final val =
                               double.tryParse(v?.replaceAll(',', '.') ?? '');
-                          if (val == null || val <= 0)
+                          if (val == null || val <= 0) {
                             return 'Masukkan berat valid';
+                          }
+                          if (val > 300) return 'Berat tidak boleh lebih dari 300 kg';
                           return null;
                         },
                       ),
@@ -209,6 +215,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                               double.tryParse(v?.replaceAll(',', '.') ?? '');
                           if (val == null || val <= 0)
                             return 'Masukkan tinggi valid';
+                            if (val < 50 || val > 250) return 'Tinggi harus antara 50-250 cm';
                           return null;
                         },
                       ),
@@ -270,10 +277,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                         const SizedBox(height: 6),
                         Wrap(spacing: 8, runSpacing: 6, children: [
                           _legendChip('Kurus', '< 18.5', Colors.blue),
-                          _legendChip('Normal', '18.5 - 24.9', Colors.green),
-                          _legendChip(
-                              'Overweight', '25.0 - 29.9', Colors.amber),
-                          _legendChip('Obesitas', '>= 30.0', Colors.red),
+                          _legendChip('Normal', '18.5 - 22.9', Colors.green),
+                          _legendChip('Overweight', '23.0 - 24.9', Colors.amber),
+                          _legendChip('Obesitas I', '25.0 - 29.9', Colors.orange),
+                          _legendChip('Obesitas II', '>= 30.0', Colors.red),
                         ])
                       ],
                     ),

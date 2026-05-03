@@ -8,7 +8,17 @@ class FoodSearch extends SearchDelegate {
   // Variabel kategori
   String selectedCategory = 'Semua';
 
-  FoodSearch({required this.foodList, required this.onItemTap});
+  /// [initialCategory] allows caller to start with a particular filter.
+  /// When user opens manual swap we can pass the current item's category so
+  /// they begin seeing same-category options but still have a 'Semua' button.
+  FoodSearch(
+      {required this.foodList,
+      required this.onItemTap,
+      String? initialCategory}) {
+    if (initialCategory != null && initialCategory.isNotEmpty) {
+      selectedCategory = initialCategory;
+    }
+  }
 
   // Logika Getter untuk Kategori Unik
   List<String> get uniqueCategories {
@@ -69,8 +79,10 @@ class FoodSearch extends SearchDelegate {
   Widget _buildListContent(BuildContext context, StateSetter setState) {
     // 1. Logika Filter
     final results = foodList.where((food) {
-      final matchesQuery = food.name.toLowerCase().contains(query.toLowerCase());
-      final matchesCategory = selectedCategory == 'Semua' || food.kategori == selectedCategory;
+      final matchesQuery =
+          food.name.toLowerCase().contains(query.toLowerCase());
+      final matchesCategory =
+          selectedCategory == 'Semua' || food.kategori == selectedCategory;
       return matchesQuery && matchesCategory;
     }).toList();
 
@@ -82,7 +94,10 @@ class FoodSearch extends SearchDelegate {
           decoration: BoxDecoration(
             color: Colors.white,
             boxShadow: [
-              BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 4, offset: const Offset(0, 2)),
+              BoxShadow(
+                  color: Colors.grey.withOpacity(0.1),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2)),
             ],
           ),
           child: SingleChildScrollView(
@@ -99,11 +114,12 @@ class FoodSearch extends SearchDelegate {
                     checkmarkColor: Colors.green,
                     labelStyle: TextStyle(
                       color: isSelected ? Colors.green[800] : Colors.black87,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.normal,
                     ),
                     backgroundColor: Colors.grey[100],
                     onSelected: (bool selected) {
-                      // MAGIC HAPPENS HERE: 
+                      // MAGIC HAPPENS HERE:
                       // setState ini memaksa tampilan refresh SEKETIKA saat diklik
                       setState(() {
                         selectedCategory = cat;
@@ -123,7 +139,8 @@ class FoodSearch extends SearchDelegate {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.search_off, size: 64, color: Colors.grey),
+                      const Icon(Icons.search_off,
+                          size: 64, color: Colors.grey),
                       const SizedBox(height: 16),
                       Text(
                         'Tidak ada makanan "$query"\ndi kategori "$selectedCategory"',
@@ -139,29 +156,42 @@ class FoodSearch extends SearchDelegate {
                     final item = results[index];
                     bool isMentah = item.kondisi.toLowerCase() == 'mentah';
 
+                    // Tampilkan makro di bawah nama makanan
+                    String macroInfo =
+                        "P: ${item.protein}g  K: ${item.carbs}g  L: ${item.fat}g";
+
                     return ListTile(
                       leading: ClipRRect(
                         borderRadius: BorderRadius.circular(8),
                         child: SizedBox(
-                          width: 50, height: 50,
-                          child: item.imageUrl != null
-                              ? Image.network(
-                                  item.imageUrl!, 
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_,__,___) => const Icon(Icons.fastfood, color: Colors.grey),
-                                )
+                          width: 50,
+                          height: 50,
+                          child: (item.imageUrl != null && item.imageUrl!.isNotEmpty)
+                              ? _buildImageWidget(item.imageUrl!)
                               : const Icon(Icons.fastfood, color: Colors.grey),
                         ),
                       ),
-                      title: Text(item.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text(
-                        "${item.calories} kal | ${item.kategori} • ${isMentah ? 'Mentah' : 'Siap Makan'}",
-                        style: TextStyle(color: isMentah ? Colors.orange : Colors.grey),
+                      title: Text(item.name,
+                          style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "${item.calories} kal | ${item.kategori} • ${isMentah ? 'Mentah' : 'Siap Makan'}",
+                            style: TextStyle(
+                                color: isMentah ? Colors.orange : Colors.grey),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(macroInfo,
+                              style: const TextStyle(
+                                  fontSize: 12, color: Colors.black87)),
+                        ],
                       ),
-                      trailing: isMentah 
+                      trailing: isMentah
                           ? const Tooltip(
-                              message: "Bahan Mentah", 
-                              child: Icon(Icons.info_outline, color: Colors.orange, size: 20))
+                              message: "Bahan Mentah",
+                              child: Icon(Icons.info_outline,
+                                  color: Colors.orange, size: 20))
                           : const Icon(Icons.chevron_right),
                       onTap: () => onItemTap(item),
                     );
@@ -171,4 +201,36 @@ class FoodSearch extends SearchDelegate {
       ],
     );
   }
+}
+
+Widget _buildImageWidget(String imageUrl) {
+  // 1. Asset lokal — prefix 'asset:' (tanpa slash, pakai colon)
+  if (imageUrl.startsWith('asset:')) {
+    final assetPath = imageUrl.substring(6); // strip prefix 'asset:'
+    return Image.asset(
+      assetPath,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.grey),
+    );
+  }
+
+  // 2. Base64 data URI (legacy)
+  if (imageUrl.startsWith('data:')) {
+    try {
+      return Image.memory(
+        Uri.parse(imageUrl).data!.contentAsBytes(),
+        fit: BoxFit.cover,
+      );
+    } catch (e) {
+      return const Center(child: Icon(Icons.broken_image, color: Colors.grey));
+    }
+  }
+
+  // 3. URL internet (http/https)
+  return Image.network(
+    imageUrl,
+    fit: BoxFit.cover,
+    errorBuilder: (context, error, stackTrace) =>
+    const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
+  );
 }

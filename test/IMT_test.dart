@@ -3,7 +3,7 @@ import 'package:final_project_nutrisee/services/calculator_service.dart';
 
 void main() {
   group('Modul Perhitungan IMT', () {
-    test('TC-IMT-001: 70kg,170cm -> IMT 24.2, Normal', () {
+    test('TC-IMT-001: 70kg,170cm -> IMT 24.2, Overweight', () {
       print('[TEST START] TC-IMT-001: Hitung IMT Normal');
       final svc = CalculatorService(
         gender: Gender.male,
@@ -15,10 +15,10 @@ void main() {
       final imt = svc.calculateBmi();
 
       print('Input: Berat 70kg, Tinggi 170cm');
-      print('Output Harapan: 24.2 (Normal) | Output Aktual: $imt (${svc.getBmiCategory(imt)})');
+      print('Output Harapan: 24.2 (Overweight) | Output Aktual: $imt (${svc.getBmiCategory(imt)})');
 
       expect(imt, equals(24.2));
-      expect(svc.getBmiCategory(imt).toLowerCase(), contains('normal'));
+      expect(svc.getBmiCategory(imt).toLowerCase(), contains('overweight'));
     });
 
     test('TC-IMT-002: Berat 0 -> throws ArgumentError', () {

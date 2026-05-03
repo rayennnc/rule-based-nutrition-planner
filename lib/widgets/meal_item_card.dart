@@ -5,11 +5,26 @@ import '../screens/food_search.dart';
 class MealItemCard extends StatefulWidget {
   final FoodItem foodItem; // Data makanan awal
   final String category; // Kategori untuk filter swap (misal: "Serealia")
+  /// optional service override (useful for testing)
+  final FirestoreService? firestoreService;
+  final bool selectable; // apakah card bisa dipilih sebagai opsi utama
+  final bool isSelected; // tampilkan highlight jika terpilih
+  final void Function(FoodItem)? onSelect; // callback ketika dipilih
+  // callback untuk memberitahu parent jika nutrisi berubah (misalnya saat swap)
+  // nilai yang dikirim sudah direfleksikan berdasarkan berat / porsi saat ini
+  final void Function(
+          double calories, double protein, double carbs, double fat)?
+      onNutritionChanged;
 
   const MealItemCard({
     Key? key,
     required this.foodItem,
     required this.category,
+    this.firestoreService,
+    this.selectable = false,
+    this.isSelected = false,
+    this.onSelect,
+    this.onNutritionChanged,
   }) : super(key: key);
 
   @override
@@ -18,17 +33,28 @@ class MealItemCard extends StatefulWidget {
 
 class _MealItemCardState extends State<MealItemCard> {
   late FoodItem currentFood; // Makanan yang sedang tampil
-  late int currentWeight; // Berat porsi (gram)
+  late double currentWeight; // Berat porsi (gram)
   bool isSwapping = false; // Loading indicator
 
-  final FirestoreService _firestoreService = FirestoreService();
+  late final FirestoreService _firestoreService;
 
   @override
   void initState() {
     super.initState();
     currentFood = widget.foodItem;
+    // allow override for testing
+    _firestoreService = widget.firestoreService ?? FirestoreService();
     // Default berat 100g (karena data DB per 100g), atau sesuaikan logika kamu
-    currentWeight = 100;
+    currentWeight = 100.0;
+    // kirim nilai awal ke parent setelah frame ter-render
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      double ratio = currentWeight / 100;
+      widget.onNutritionChanged?.call(
+          (currentFood.calories * ratio).roundToDouble(),
+          currentFood.protein * ratio,
+          currentFood.carbs * ratio,
+          currentFood.fat * ratio);
+    });
   }
 
   // LOGIKA SWAP & HITUNG ULANG
@@ -53,13 +79,22 @@ class _MealItemCardState extends State<MealItemCard> {
 
       setState(() {
         currentFood = newFood;
-        currentWeight = newWeightDouble.round(); // Update berat baru
+        currentWeight = newWeightDouble; // Update berat baru
         isSwapping = false;
       });
 
+      // beri tahu parent tentang nilai nutrisi baru
+      double ratio = currentWeight / 100;
+      widget.onNutritionChanged?.call(
+          (currentFood.calories * ratio).roundToDouble(),
+          currentFood.protein * ratio,
+          currentFood.carbs * ratio,
+          currentFood.fat * ratio);
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text("Diganti ke ${newFood.name} (${currentWeight}g)")),
+            content:
+                Text("Diganti ke ${newFood.name} (${currentWeight.round()}g)")),
       );
     } else {
       setState(() => isSwapping = false);
@@ -70,14 +105,17 @@ class _MealItemCardState extends State<MealItemCard> {
   }
 
   // OPEN SEARCH DIALOG & SWAP MANUAL
+  // unlike the randomized swap, the manual search is not limited by
+  // category. user can type/select any food from the database (cross-cat)
   Future<void> _openSearchAndSwap() async {
     setState(() => isSwapping = true);
 
-    // Ambil kandidat (menggunakan cache di FirestoreService)
-    List<FoodItem> candidates =
-        await _firestoreService.getFoodCandidates(widget.category);
+    // Ambil kandidat untuk dialog pencarian. Untuk manual swap kita
+    // tidak membatasi kategori supaya user bebas memilih makanan lain.
+    // (random swap tetap memakai kategori agar lebih cocok otomatis).
+    List<FoodItem> candidates = await _firestoreService.getAllFoodItems();
 
-    // Jika tidak ada kandidat selain item yang sedang tampil
+    // Buang makanan yang sedang tampil sekarang
     var filtered = candidates.where((f) => f.id != currentFood.id).toList();
 
     if (filtered.isEmpty) {
@@ -93,6 +131,7 @@ class _MealItemCardState extends State<MealItemCard> {
       context: context,
       delegate: FoodSearch(
         foodList: filtered,
+        initialCategory: widget.category,
         onItemTap: (FoodItem item) {
           // Validasi kalori
           if (item.calories <= 0) {
@@ -109,9 +148,9 @@ class _MealItemCardState extends State<MealItemCard> {
 
           double targetCalories = (currentFood.calories * currentWeight / 100);
           double newWeightDouble = (targetCalories / item.calories) * 100;
-          int newWeight = newWeightDouble.isFinite
-              ? newWeightDouble.round().clamp(10, 2000)
-              : 100;
+          double newWeight = newWeightDouble.isFinite
+              ? newWeightDouble.clamp(10.0, 2000.0)
+              : 100.0;
 
           setState(() {
             currentFood = item;
@@ -119,12 +158,21 @@ class _MealItemCardState extends State<MealItemCard> {
             isSwapping = false;
           });
 
+          // Notify parent after swap so summary updates
+          double ratio = newWeight / 100;
+          widget.onNutritionChanged?.call(
+            (item.calories * ratio).roundToDouble(),
+            item.protein * ratio,
+            item.carbs * ratio,
+            item.fat * ratio,
+          );
+
           Navigator.pop(context); // tutup search
 
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-                content:
-                    Text('Diganti menjadi ${item.name} — ${currentWeight}g')),
+                content: Text(
+                    'Diganti menjadi ${item.name} — ${newWeight.round()}g')),
           );
         },
       ),
@@ -145,9 +193,18 @@ class _MealItemCardState extends State<MealItemCard> {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      color: widget.isSelected ? Colors.green.withOpacity(0.06) : null,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: widget.isSelected
+            ? BorderSide(color: Colors.green.shade400, width: 2)
+            : BorderSide(color: Colors.transparent, width: 0),
+      ),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () => _showFoodDetail(context, currentFood),
+        onTap: widget.selectable && widget.onSelect != null
+            ? () => widget.onSelect!(currentFood)
+            : () => _showFoodDetail(context, currentFood),
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Row(
@@ -175,14 +232,28 @@ class _MealItemCardState extends State<MealItemCard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(currentFood.name,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 16)),
-                    Text("$currentWeight gram",
-                        style: const TextStyle(
-                            color: Colors.green, fontWeight: FontWeight.bold)),
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: Colors.black87)),
+                    if (widget.selectable)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4.0, bottom: 6.0),
+                        child: Text(
+                          'Ketuk kartu untuk pilih · Ketuk ikon info untuk detail',
+                          style:
+                              TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        ),
+                      ),
+                    Text("${currentWeight.round()} gram",
+                        style: TextStyle(
+                            color: widget.isSelected
+                                ? Colors.green.shade900
+                                : Colors.green[700],
+                            fontWeight: FontWeight.w700)),
                     Text(
                       "P: ${realP.toStringAsFixed(1)} | K: ${realC.toStringAsFixed(1)} | L: ${realF.toStringAsFixed(1)}",
-                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      style: TextStyle(fontSize: 12, color: Colors.grey[700]),
                     ),
                   ],
                 ),
@@ -192,8 +263,12 @@ class _MealItemCardState extends State<MealItemCard> {
               Column(
                 children: [
                   Text("$realCal kkal",
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 16)),
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: widget.isSelected
+                              ? Colors.green.shade800
+                              : Colors.green[700])),
                   isSwapping
                       ? const SizedBox(
                           width: 20,
@@ -202,6 +277,13 @@ class _MealItemCardState extends State<MealItemCard> {
                       : Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            IconButton(
+                              icon: const Icon(Icons.info_outline,
+                                  color: Colors.grey),
+                              onPressed: () =>
+                                  _showFoodDetail(context, currentFood),
+                              tooltip: "Info",
+                            ),
                             IconButton(
                               icon:
                                   const Icon(Icons.search, color: Colors.green),
@@ -227,6 +309,19 @@ class _MealItemCardState extends State<MealItemCard> {
 
   // --- HELPER UI ---
   Widget _buildImageWidget(String imageUrl) {
+    // support three forms of URL:
+    // 1. asset:foto.jpg   -> load from bundled assets (no network)
+    // 2. data:...        -> base64 data URI (legacy, decoded in memory)
+    // 3. https://...     -> remote URL via network
+
+    if (imageUrl.startsWith('asset:')) {
+      // strip prefix and load from assets directory
+      final assetPath = imageUrl.substring(6);
+      return Image.asset(assetPath,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image));
+    }
+
     if (imageUrl.startsWith('data:')) {
       try {
         return Image.memory(Uri.parse(imageUrl).data!.contentAsBytes(),

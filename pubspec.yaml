@@ -65,6 +65,21 @@ flutter:
   # assets:
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
+  assets:
+    # location of your picture files; adjust if you keep them under lib
+    - assets/images/Buah/
+    - assets/images/Bumbu/
+    - assets/images/Daging, Unggas/
+    - assets/images/Gula, Sirup, dan Konfeksioneri/
+    - assets/images/Ikan, Kerang, Udang/
+    - assets/images/Kacang, Biji, Bean/
+    - assets/images/Lemak, Minyak/
+    - assets/images/Minuman/
+    - assets/images/Sayuran/
+    - assets/images/Serealia/
+    - assets/images/Susu/
+    - assets/images/Telur/
+    - assets/images/Umbi/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/macro_nutrient.dart';
 import '../services/firestore_service.dart';
@@ -234,7 +235,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
             _buildMacroInput(
               label: 'Protein (%)',
               controller: _proteinCtl,
-              hint: '10-35', // Updated hint sesuai AMDR
+              hint: '10-35', // Updated hint sesuai AMDR, kalau 15% max itu dari WHO
               color: Colors.red,
             ),
             const SizedBox(height: 12),
@@ -243,7 +244,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
             _buildMacroInput(
               label: 'Lemak (%)',
               controller: _fatCtl,
-              hint: '15-35', // Updated hint sesuai WHO/AMDR
+              hint: '15-30', // Updated hint sesuai WHO/AMDR
               color: Colors.yellow[700]!,
             ),
             const SizedBox(height: 24),
@@ -440,6 +441,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
     return TextFormField(
       controller: controller,
       keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
