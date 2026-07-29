@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/calculator_service.dart';
 import '../services/local_storage_service.dart';
 import '../services/firestore_service.dart';
 import '../auth/auth_service.dart';
-import 'results_screen.dart';
+import '../widgets/main_shell.dart';
 import '../widgets/profile_summary.dart';
+import 'package:provider/provider.dart';
+import '../models/profile_notifier.dart';
 
 class InputFormScreen extends StatefulWidget {
-  const InputFormScreen({super.key});
+  final bool asEdit;
+  const InputFormScreen({super.key, this.asEdit = false});
 
   @override
   State<InputFormScreen> createState() => _InputFormScreenState();
@@ -18,16 +20,40 @@ class InputFormScreen extends StatefulWidget {
 
 class _InputFormScreenState extends State<InputFormScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _namaController = TextEditingController();
   final _weightController = TextEditingController();
   final FocusNode _weightFocusNode = FocusNode();
   final _heightController = TextEditingController();
-  final _ageController = TextEditingController();
+  final _tanggalLahirController = TextEditingController();
   final LocalStorageService _localStorageService =
-      LocalStorageService(); // service penyimpanan Local Storage
+      LocalStorageService(); // service penyimpanan local
   final AuthService _authService = AuthService();
 
   Gender? _selectedGender;
   ActivityLevel? _selectedActivityLevel;
+  DateTime? _selectedTanggalLahir;
+
+  static const List<String> _namaBulan = [
+    '',
+    'Januari',
+    'Februari',
+    'Maret',
+    'April',
+    'Mei',
+    'Juni',
+    'Juli',
+    'Agustus',
+    'September',
+    'Oktober',
+    'November',
+    'Desember',
+  ];
+
+  // Alergi options (demo simple): cukup 3 pilihan
+  // bool _allergySusu = false;
+  bool _allergyKerangUdang = false;
+  bool _allergyKacang = false;
+  bool _allergyTelur = false;
 
   @override
   void initState() {
@@ -51,15 +77,20 @@ class _InputFormScreenState extends State<InputFormScreen> {
         final fs = FirestoreService();
         final profile = await fs.loadUserProfile(user.uid);
         if (profile != null) {
-          // Map firestore numeric values to string for controllers/local save
+          // Jika tidak ada data lokal, ambil profil user dari Firestore
+          // lalu simpan ke local cache.
+          finalData['nama'] =
+              (profile['nama'] != null) ? profile['nama'].toString() : '';
           finalData['berat'] = (profile['weightKg'] != null)
               ? profile['weightKg'].toString()
               : '';
           finalData['tinggi'] = (profile['heightCm'] != null)
               ? profile['heightCm'].toString()
               : '';
-          finalData['usia'] =
-              (profile['age'] != null) ? profile['age'].toString() : '';
+          final tglLahirProfile = profile['tanggalLahir'];
+          finalData['tanggalLahir'] = (tglLahirProfile is DateTime)
+              ? tglLahirProfile.toIso8601String()
+              : '';
           finalData['gender'] = (profile['gender'] != null)
               ? profile['gender'].toString()
               : 'Laki - Laki';
@@ -67,11 +98,12 @@ class _InputFormScreenState extends State<InputFormScreen> {
               ? profile['activityLevel'].toString()
               : 'Ringan';
 
-          // Cache to local so subsequent launches won't hit Firestore
+          // Cache ke local supaya tidak perlu fetch Firestore lagi.
           await _localStorageService.simpanDataUser(
+            nama: finalData['nama']!,
             berat: finalData['berat']!,
             tinggi: finalData['tinggi']!,
-            usia: finalData['usia']!,
+            tanggalLahir: finalData['tanggalLahir']!,
             gender: finalData['gender']!,
             aktivitas: finalData['aktivitas']!,
           );
@@ -81,12 +113,32 @@ class _InputFormScreenState extends State<InputFormScreen> {
 
     if (mounted) {
       setState(() {
-        // Isi Text Controllers
+        // Isi form dengan nilai yang sudah tersedia.
+        _namaController.text = finalData['nama'] ?? '';
         _weightController.text = finalData['berat'] ?? '';
         _heightController.text = finalData['tinggi'] ?? '';
-        _ageController.text = finalData['usia'] ?? '';
 
-        // Isi Dropdown Gender (Konversi String -> Enum)
+        final tglLahirStr = finalData['tanggalLahir'] ?? '';
+        if (tglLahirStr.isNotEmpty) {
+          try {
+            _selectedTanggalLahir = DateTime.parse(tglLahirStr);
+            _tanggalLahirController.text =
+                _formatTanggalLahir(_selectedTanggalLahir!);
+          } catch (_) {
+            _selectedTanggalLahir = null;
+            _tanggalLahirController.text = '';
+          }
+        }
+
+        // Parse alergi string menjadi checkbox state (demo simple)
+        final allergiRaw = (finalData['alergi'] ?? '').toLowerCase();
+        // _allergySusu = allergiRaw.contains('susu');
+        _allergyKerangUdang =
+            allergiRaw.contains('udang') || allergiRaw.contains('kerang');
+        _allergyKacang = allergiRaw.contains('kacang');
+        _allergyTelur = allergiRaw.contains('telur');
+
+        // Konversi string Firestore/local menjadi enum Gender.
         if (finalData['gender'] == 'Laki - Laki') {
           _selectedGender = Gender.male;
         } else if (finalData['gender'] == 'Perempuan') {
@@ -95,6 +147,7 @@ class _InputFormScreenState extends State<InputFormScreen> {
 
         // Isi Dropdown Aktivitas (Konversi String -> Enum)
         String activityStr = finalData['aktivitas'] ?? 'Sedang';
+        // Konversi string aktivitas menjadi enum ActivityLevel.
         switch (activityStr) {
           case 'Tidak Bergerak Banyak':
             _selectedActivityLevel = ActivityLevel.sedentary;
@@ -121,20 +174,62 @@ class _InputFormScreenState extends State<InputFormScreen> {
   @override
   void dispose() {
     _weightFocusNode.dispose();
+    _namaController.dispose();
     _weightController.dispose();
     _heightController.dispose();
-    _ageController.dispose();
+    _tanggalLahirController.dispose();
     super.dispose();
   }
 
-  void _calculate() {
+  /// Build comma-separated allergy string from checkbox selections
+  String _buildAllergyString() {
+    final selected = <String>[];
+    // if (_allergySusu) selected.add('susu');
+    if (_allergyKerangUdang) {
+      selected.add('udang');
+      selected.add('kerang');
+    }
+    if (_allergyKacang) selected.add('kacang');
+    if (_allergyTelur) selected.add('telur');
+    return selected.join(', ');
+  }
+
+  /// Format tanggal lahir untuk ditampilkan di form, misal "17 Agustus 2000".
+  String _formatTanggalLahir(DateTime d) {
+    return '${d.day} ${_namaBulan[d.month]} ${d.year}';
+  }
+
+  /// Buka date picker untuk memilih tanggal lahir. Rentang tanggal dibatasi
+  /// agar umur yang dihasilkan otomatis berada di 18-75 tahun.
+  Future<void> _pickTanggalLahir() async {
+    final now = DateTime.now();
+    final initialDate =
+        _selectedTanggalLahir ?? DateTime(now.year - 25, now.month, now.day);
+
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: DateTime(now.year - 75, now.month, now.day),
+      lastDate: DateTime(now.year - 18, now.month, now.day),
+      helpText: 'Pilih Tanggal Lahir',
+    );
+
+    if (picked != null) {
+      setState(() {
+        _selectedTanggalLahir = picked;
+        _tanggalLahirController.text = _formatTanggalLahir(picked);
+      });
+    }
+  }
+
+  Future<void> _calculate() async {
     if (_formKey.currentState!.validate()) {
-      // 2. Simpan Data ke HP sebelum pindah halaman
-      // Kita harus ubah Enum kembali ke String biar bisa disimpan
+      // Simpan input ke lokal sebelum navigasi.
       String genderStr =
           _selectedGender == Gender.male ? 'Laki - Laki' : 'Perempuan';
 
       String activityStr = 'Ringan';
+      // Convert enum aktivitas ke label yang bisa disimpan.
       switch (_selectedActivityLevel!) {
         case ActivityLevel.sedentary:
           activityStr = 'Tidak Bergerak Banyak';
@@ -153,49 +248,70 @@ class _InputFormScreenState extends State<InputFormScreen> {
           break;
       }
 
-      // Eksekusi Simpan ke Local Storage
-      _localStorageService.simpanDataUser(
+      final allergyStr = _buildAllergyString();
+
+      // Tunggu simpan ke Local Storage agar UI konsisten saat kembali.
+      await _localStorageService.simpanDataUser(
+        nama: _namaController.text,
         berat: _weightController.text,
         tinggi: _heightController.text,
-        usia: _ageController.text,
+        tanggalLahir: _selectedTanggalLahir!.toIso8601String(),
         gender: genderStr,
         aktivitas: activityStr,
+        alergi: allergyStr,
       );
 
-      // Simpan Profile ke Firestore (async, tidak blocking)
+      // Simpan profil user ke Firestore di background.
       _saveProfileToFirestore(
+        nama: _namaController.text,
         berat: double.parse(_weightController.text),
         tinggi: double.parse(_heightController.text),
-        usia: int.parse(_ageController.text),
+        tanggalLahir: _selectedTanggalLahir!,
         gender: genderStr,
         aktivitas: activityStr,
+        alergi: allergyStr,
       );
 
-      // Logika Perhitungan
+      // Notify app-level profile state so ResultsScreen/others recalc.
+      try {
+        final notifier = Provider.of<ProfileNotifier>(context, listen: false);
+        await notifier.refresh();
+      } catch (_) {}
+
+      // Jika dipanggil sebagai edit profile, cukup kembali dan kirim true.
+      if (widget.asEdit) {
+        if (mounted) Navigator.pop(context, true);
+        return;
+      }
+
+      // Jika bukan edit (onboarding), lanjutkan ke MainShell dengan Calculator.
       final calculator = CalculatorService(
         gender: _selectedGender!,
         weight: double.parse(_weightController.text.replaceAll(',', '.')),
         height: double.parse(_heightController.text.replaceAll(',', '.')),
-        age: int.parse(_ageController.text),
+        age: CalculatorService.hitungUmurDariTanggalLahir(
+            _selectedTanggalLahir!),
         activityLevel: _selectedActivityLevel!,
       );
 
-      Navigator.push(
+      Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => ResultsScreen(calculator: calculator),
+          builder: (context) => MainShell(calculator: calculator),
         ),
       );
     }
   }
 
-  // Fungsi untuk menyimpan profile ke Firestore
+  // Simpan profil user ke koleksi users di Firestore.
   Future<void> _saveProfileToFirestore({
+    required String nama,
     required double berat,
     required double tinggi,
-    required int usia,
+    required DateTime tanggalLahir,
     required String gender,
     required String aktivitas,
+    required String alergi,
   }) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
@@ -207,22 +323,23 @@ class _InputFormScreenState extends State<InputFormScreen> {
       final uid = user.uid;
       final now = Timestamp.now();
 
-      // Simpan ke /users/{uid}
+      // Update atau buat dokumen profil user di Firestore.
       await FirebaseFirestore.instance.collection('users').doc(uid).set({
         'email': user.email,
-        'nama': user.displayName ?? 'User',
+        'nama': nama,
         'heightCm': tinggi, // number type
         'weightKg': berat, // number type
-        'age': usia, // number type
+        'tanggalLahir': Timestamp.fromDate(tanggalLahir),
         'gender': gender,
         'activityLevel': aktivitas,
+        'allergies': alergi,
         'updatedAt': now,
         'createdAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true)); // merge: true = update existing fields
 
-      debugPrint('✅ Profile disimpan ke Firestore (UID: $uid)');
+      debugPrint('Profile disimpan ke Firestore (UID: $uid)');
     } catch (e) {
-      debugPrint('❌ Error simpan ke Firestore: $e');
+      debugPrint('Error simpan ke Firestore: $e');
     }
   }
 
@@ -231,6 +348,7 @@ class _InputFormScreenState extends State<InputFormScreen> {
       await _localStorageService.hapusDataUser();
       await _authService.signOut();
       if (mounted) {
+        // Kembali ke layar welcome dan hapus history navigasi.
         Navigator.of(context)
             .pushNamedAndRemoveUntil('/welcome', (route) => false);
       }
@@ -409,6 +527,28 @@ class _InputFormScreenState extends State<InputFormScreen> {
             children: [
               ProfileSummary(onEdit: () => _weightFocusNode.requestFocus()),
               const SizedBox(height: 8),
+              // Input nama user
+              TextFormField(
+                controller: _namaController,
+                decoration: const InputDecoration(
+                  labelText: 'Nama Lengkap',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.person),
+                  hintText: 'Contoh: John Doe',
+                ),
+                keyboardType: TextInputType.text,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Mohon masukkan nama';
+                  }
+                  if (value.length < 3) {
+                    return 'Nama minimal 3 karakter';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              // Input berat badan user.
               TextFormField(
                 controller: _weightController,
                 focusNode: _weightFocusNode,
@@ -418,17 +558,20 @@ class _InputFormScreenState extends State<InputFormScreen> {
                 ),
                 keyboardType: TextInputType.numberWithOptions(decimal: true),
                 validator: (value) {
-                  if (value == null || value.isEmpty) return 'Mohon masukkan berat badan';
+                  if (value == null || value.isEmpty)
+                    return 'Mohon masukkan berat badan';
 
-                  String valStr = value.replaceAll(',', '.'); // Ganti koma dengan titik
+                  String valStr =
+                      value.replaceAll(',', '.'); // Ganti koma dengan titik
                   final weight = double.tryParse(valStr);
                   if (weight == null || weight <= 0 || weight > 300) {
                     return 'Berat badan tidak valid (1 - 300 kg)';
-                    }
+                  }
                   return null;
-                  },
+                },
               ),
               const SizedBox(height: 16),
+              // Input tinggi badan user.
               TextFormField(
                 controller: _heightController,
                 decoration: const InputDecoration(
@@ -437,37 +580,43 @@ class _InputFormScreenState extends State<InputFormScreen> {
                 ),
                 keyboardType: TextInputType.numberWithOptions(decimal: true),
                 validator: (value) {
-                  if (value == null || value.isEmpty) return 'Mohon masukkan tinggi badan';
-                  
+                  if (value == null || value.isEmpty)
+                    return 'Mohon masukkan tinggi badan';
+
                   String valStr = value.replaceAll(',', '.');
                   final height = double.tryParse(valStr); // Pakai double
-                  
+
                   if (height == null || height < 50 || height > 250) {
                     return 'Tinggi badan tidak valid (50–250 cm)';
-                    }
-                    return null;
-                    },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _ageController,
-                decoration: const InputDecoration(
-                  labelText: 'Umur',
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                validator: (value) {
-                  if (value == null || value.isEmpty) return 'Mohon masukkan umur';
-                  final age = int.tryParse(value);
-                  if (age == null || age < 18 || age > 75) {
-                    return 'Umur tidak valid (18-75 tahun)';
-                    }
-                    return null;
+                  }
+                  return null;
                 },
-                    
               ),
               const SizedBox(height: 16),
+              // Input tanggal lahir user (umur dihitung otomatis dari sini).
+              TextFormField(
+                controller: _tanggalLahirController,
+                readOnly: true,
+                decoration: const InputDecoration(
+                  labelText: 'Tanggal Lahir',
+                  border: OutlineInputBorder(),
+                  suffixIcon: Icon(Icons.calendar_today),
+                ),
+                onTap: _pickTanggalLahir,
+                validator: (value) {
+                  if (_selectedTanggalLahir == null) {
+                    return 'Mohon pilih tanggal lahir';
+                  }
+                  final umur = CalculatorService.hitungUmurDariTanggalLahir(
+                      _selectedTanggalLahir!);
+                  if (umur < 18 || umur > 75) {
+                    return 'Umur tidak valid (18-75 tahun)';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              // Pilihan jenis kelamin.
               DropdownButtonFormField<Gender>(
                 value: _selectedGender,
                 decoration: const InputDecoration(
@@ -485,6 +634,7 @@ class _InputFormScreenState extends State<InputFormScreen> {
                     value == null ? 'Mohon pilih jenis kelamin' : null,
               ),
               const SizedBox(height: 16),
+              // Pilihan level aktivitas harian.
               DropdownButtonFormField<ActivityLevel>(
                 value: _selectedActivityLevel,
                 decoration: const InputDecoration(
@@ -509,6 +659,59 @@ class _InputFormScreenState extends State<InputFormScreen> {
                     setState(() => _selectedActivityLevel = value),
                 validator: (value) =>
                     value == null ? 'Mohon pilih level aktivitas' : null,
+              ),
+              const SizedBox(height: 16),
+              // Alergi checkboxes (3 opsi standar)
+              Card(
+                elevation: 1,
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Alergi / Bahan yang Harus Dihindari',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      /* CheckboxListTile(
+                        value: _allergySusu,
+                        onChanged: (val) =>
+                            setState(() => _allergySusu = val ?? false),
+                        title: const Text('Susu'),
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                      ), */
+                      CheckboxListTile(
+                        value: _allergyKerangUdang,
+                        onChanged: (val) =>
+                            setState(() => _allergyKerangUdang = val ?? false),
+                        title: const Text('Kerang / Udang'),
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                      ),
+                      CheckboxListTile(
+                        value: _allergyKacang,
+                        onChanged: (val) =>
+                            setState(() => _allergyKacang = val ?? false),
+                        title: const Text('Kacang'),
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                      ),
+                      CheckboxListTile(
+                        value: _allergyTelur,
+                        onChanged: (val) =>
+                            setState(() => _allergyTelur = val ?? false),
+                        title: const Text('Telur'),
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                      ),
+                    ],
+                  ),
+                ),
               ),
               const SizedBox(height: 20),
               _buildActivityLevelExplanation(),

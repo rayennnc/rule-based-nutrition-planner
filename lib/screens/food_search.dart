@@ -2,25 +2,24 @@ import 'package:flutter/material.dart';
 import '../services/firestore_service.dart'; // Sesuaikan path import
 
 class FoodSearch extends SearchDelegate {
-  final List<FoodItem> foodList;
-  final Function(FoodItem) onItemTap;
+  final List<FoodItem> foodList; // daftar makanan yang bisa dicari
+  final Function(FoodItem) onItemTap; // callback saat item dipilih
+  final List<String>? allergens; // daftar alergen user untuk filter tambahan
 
-  // Variabel kategori
-  String selectedCategory = 'Semua';
+  String selectedCategory = 'Semua'; // filter kategori aktif
 
-  /// [initialCategory] allows caller to start with a particular filter.
-  /// When user opens manual swap we can pass the current item's category so
-  /// they begin seeing same-category options but still have a 'Semua' button.
+  /// Mulai dengan kategori awal jika dipanggil dari swap manual.
   FoodSearch(
       {required this.foodList,
       required this.onItemTap,
-      String? initialCategory}) {
+      String? initialCategory,
+      this.allergens}) {
     if (initialCategory != null && initialCategory.isNotEmpty) {
       selectedCategory = initialCategory;
     }
   }
 
-  // Logika Getter untuk Kategori Unik
+  // Ambil daftar kategori unik untuk filter chip.
   List<String> get uniqueCategories {
     final categories = foodList.map((food) => food.kategori).toSet().toList();
     categories.sort();
@@ -32,6 +31,7 @@ class FoodSearch extends SearchDelegate {
 
   @override
   List<Widget>? buildActions(BuildContext context) {
+    // Tampilkan tombol clear hanya saat ada teks pencarian.
     return [
       if (query.isNotEmpty)
         IconButton(
@@ -46,6 +46,7 @@ class FoodSearch extends SearchDelegate {
 
   @override
   Widget? buildLeading(BuildContext context) {
+    // Tombol kembali untuk keluar dari dialog pencarian.
     return IconButton(
       icon: const Icon(Icons.arrow_back),
       onPressed: () {
@@ -56,13 +57,13 @@ class FoodSearch extends SearchDelegate {
 
   @override
   Widget buildResults(BuildContext context) {
-    // Saat tekan enter
+    // Tampilkan hasil saat user submit pencarian.
     return _buildStatefulBody(context);
   }
 
   @override
   Widget buildSuggestions(BuildContext context) {
-    // Saat mengetik (atau saat baru buka)
+    // Tampilkan saran saat user mengetik.
     return _buildStatefulBody(context);
   }
 
@@ -77,13 +78,15 @@ class FoodSearch extends SearchDelegate {
 
   // --- KONTEN UTAMA ---
   Widget _buildListContent(BuildContext context, StateSetter setState) {
-    // 1. Logika Filter
+    // Filter berdasarkan teks pencarian, kategori terpilih, dan alergi user.
     final results = foodList.where((food) {
       final matchesQuery =
           food.name.toLowerCase().contains(query.toLowerCase());
       final matchesCategory =
           selectedCategory == 'Semua' || food.kategori == selectedCategory;
-      return matchesQuery && matchesCategory;
+      // Exclude makanan yang mengandung alergen user
+      final notAllergen = !food.matchesAllergens(allergens);
+      return matchesQuery && matchesCategory && notAllergen;
     }).toList();
 
     return Column(
@@ -119,8 +122,7 @@ class FoodSearch extends SearchDelegate {
                     ),
                     backgroundColor: Colors.grey[100],
                     onSelected: (bool selected) {
-                      // MAGIC HAPPENS HERE:
-                      // setState ini memaksa tampilan refresh SEKETIKA saat diklik
+                      // Ubah kategori dan refresh daftar segera.
                       setState(() {
                         selectedCategory = cat;
                       });
@@ -156,7 +158,7 @@ class FoodSearch extends SearchDelegate {
                     final item = results[index];
                     bool isMentah = item.kondisi.toLowerCase() == 'mentah';
 
-                    // Tampilkan makro di bawah nama makanan
+                    // Info nutrisi singkat untuk tiap item.
                     String macroInfo =
                         "P: ${item.protein}g  K: ${item.carbs}g  L: ${item.fat}g";
 
@@ -166,7 +168,8 @@ class FoodSearch extends SearchDelegate {
                         child: SizedBox(
                           width: 50,
                           height: 50,
-                          child: (item.imageUrl != null && item.imageUrl!.isNotEmpty)
+                          child: (item.imageUrl != null &&
+                                  item.imageUrl!.isNotEmpty)
                               ? _buildImageWidget(item.imageUrl!)
                               : const Icon(Icons.fastfood, color: Colors.grey),
                         ),
@@ -210,7 +213,8 @@ Widget _buildImageWidget(String imageUrl) {
     return Image.asset(
       assetPath,
       fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.grey),
+      errorBuilder: (_, __, ___) =>
+          const Icon(Icons.broken_image, color: Colors.grey),
     );
   }
 
@@ -231,6 +235,6 @@ Widget _buildImageWidget(String imageUrl) {
     imageUrl,
     fit: BoxFit.cover,
     errorBuilder: (context, error, stackTrace) =>
-    const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
+        const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
   );
 }

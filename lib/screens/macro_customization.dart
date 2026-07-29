@@ -25,6 +25,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
   late TextEditingController _proteinCtl;
   late TextEditingController _fatCtl;
 
+  // state macro saat ini dan hasil validasi input
   MacroNutrient? _currentMacro;
   String? _errorMessage;
   String? _warningMessage;
@@ -35,7 +36,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
   @override
   void initState() {
     super.initState();
-    // Default start with Balanced Diet (WHO Standard)
+    // mulai dengan preset balanced lalu muat preferensi yang tersimpan
     _carbCtl = TextEditingController(
         text: MacroNutrient.balanced.carbPercent.toStringAsFixed(0));
     _proteinCtl = TextEditingController(
@@ -47,7 +48,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
   }
 
   Future<void> _loadPreferences() async {
-    // 1) Try local cache first (very cheap)
+    // preferensi makro di-cache lokal agar buka ulang lebih cepat
     final local = await _localStorage.loadMacroPreferencesLocal();
     if (local != null && local.isNotEmpty) {
       final c = local['carbPercent'] ?? local['carb'] ?? 0.0;
@@ -60,7 +61,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
       return;
     }
 
-    // 2) If not in local, try Firestore (single read)
+    // jika belum ada di cache lokal, baca dari Firestore
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
       try {
@@ -103,7 +104,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
         fatPercent: fat,
       );
 
-      // Check total
+      // periksa rasio total dan berikan peringatan jika tidak 100%
       double total = carb + protein + fat;
       if ((total - 100.0).abs() > 0.1) {
         _errorMessage =
@@ -111,7 +112,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
       } else {
         _errorMessage = null;
 
-        // Check AMDR / WHO Limits
+        // periksa batas AMDR/WHO untuk format macro
         _warningMessage = _currentMacro!.getAMDRWarning();
         _showWarning = _warningMessage != null;
       }
@@ -135,7 +136,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
       return;
     }
 
-    // Simpan ke Firestore sebelum close dialog (jangan lupa cache lokal)
+    // simpan preferensi ke Firestore terlebih dahulu
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid != null && _currentMacro != null) {
@@ -150,7 +151,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
       debugPrint('❌ Error saving macro preferences: $e');
     }
 
-    // Simpan juga ke cache lokal agar tidak perlu read saat app restart
+    // cache lokal agar preferensi tersedia lebih cepat berikutnya
     try {
       if (_currentMacro != null) {
         await _localStorage.saveMacroPreferencesLocal(
@@ -175,7 +176,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
     _updateMacro();
   }
 
-  // Helper untuk menggunakan Preset Object langsung
+  // pasang preset makro ke input field saat tombol rekomendasi ditekan
   void _usePreset(MacroNutrient preset) {
     _setPreset(preset.carbPercent, preset.proteinPercent, preset.fatPercent);
   }
@@ -215,7 +216,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
             ),
             const SizedBox(height: 24),
 
-            // Input fields
+            // judul bagian input rasio makro
             const Text(
               'Masukkan Rasio Makronutrien (%)',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -235,7 +236,8 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
             _buildMacroInput(
               label: 'Protein (%)',
               controller: _proteinCtl,
-              hint: '10-35', // Updated hint sesuai AMDR, kalau 15% max itu dari WHO
+              hint:
+                  '10-35', // Updated hint sesuai AMDR, kalau 15% max itu dari WHO
               color: Colors.red,
             ),
             const SizedBox(height: 12),
@@ -358,10 +360,10 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
                 ),
                 const SizedBox(width: 8),
 
-                // 2. Tombol High Protein (Atlet)
+                // 2. Tombol Performance / Atlet
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: () => _usePreset(MacroNutrient.highProtein),
+                    onPressed: () => _usePreset(MacroNutrient.performance),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
@@ -369,7 +371,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
                       children: [
                         Text('Atlet',
                             style: TextStyle(fontWeight: FontWeight.bold)),
-                        Text('(High Protein)\n50-30-20',
+                        Text('(Atlet)\n50-30-20',
                             textAlign: TextAlign.center,
                             style: TextStyle(fontSize: 10, color: Colors.grey)),
                       ],
@@ -432,6 +434,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
     );
   }
 
+  // komponen input ulang untuk setiap makronutrien
   Widget _buildMacroInput({
     required String label,
     required TextEditingController controller,
@@ -464,6 +467,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
     );
   }
 
+  // tampilkan estimasi gram per hari berdasarkan TDEE dan persentase makro
   Widget _buildMacroBreakdown() {
     final grams = _currentMacro!.calculateGrams(widget.tdee);
 
@@ -509,6 +513,7 @@ class _MacroCustomizationScreenState extends State<MacroCustomizationScreen> {
     );
   }
 
+  // kartu ringkas untuk menampilkan persentase dan gram makro
   Widget _buildMacroCard({
     required String label,
     required double percent,

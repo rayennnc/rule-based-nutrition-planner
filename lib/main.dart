@@ -4,10 +4,13 @@ import 'firebase_options.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/input_form_screen.dart';
 import 'screens/login_screen.dart';
-import 'screens/results_screen.dart';
+import 'widgets/main_shell.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'services/firestore_service.dart';
 import 'services/calculator_service.dart';
+import 'package:provider/provider.dart';
+import 'models/profile_notifier.dart';
+import 'services/local_storage_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,47 +25,50 @@ class NutriSeeApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'NutriSee',
-      theme: ThemeData(
-        primarySwatch: Colors.green,
-        scaffoldBackgroundColor: Colors.white,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.green,
-          foregroundColor: Colors.white,
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.green,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
-            textStyle: const TextStyle(fontSize: 18),
+    return ChangeNotifierProvider(
+        create: (_) => ProfileNotifier(LocalStorageService())..loadFromLocal(),
+        child: MaterialApp(
+          title: 'NutriSee',
+          theme: ThemeData(
+            primarySwatch: Colors.green,
+            scaffoldBackgroundColor: Colors.white,
+            visualDensity: VisualDensity.adaptivePlatformDensity,
+            appBarTheme: const AppBarTheme(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            elevatedButtonTheme: ElevatedButtonThemeData(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+                textStyle: const TextStyle(fontSize: 18),
+              ),
+            ),
           ),
-        ),
-      ),
-      debugShowCheckedModeBanner: false,
-      routes: {
-        '/input': (context) => const InputFormScreen(),
-        '/login': (context) => const LoginScreen(),
-        '/welcome': (context) => const WelcomeScreen(),
-      },
-      home: StreamBuilder<User?>(
-        stream: FirebaseAuth.instance.authStateChanges(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Scaffold(
-                body: Center(child: CircularProgressIndicator()));
-          }
-          if (snapshot.hasData) {
-            // User sudah login → cek profil dulu
-            return const AuthRedirectScreen();
-          }
-          // Belum login
-          return const WelcomeScreen();
-        },
-      ),
-    );
+          debugShowCheckedModeBanner: false,
+          routes: {
+            '/input': (context) => const InputFormScreen(),
+            '/login': (context) => const LoginScreen(),
+            '/welcome': (context) => const WelcomeScreen(),
+          },
+          home: StreamBuilder<User?>(
+            stream: FirebaseAuth.instance.authStateChanges(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Scaffold(
+                    body: Center(child: CircularProgressIndicator()));
+              }
+              if (snapshot.hasData) {
+                // User sudah login → cek profil dulu
+                return const AuthRedirectScreen();
+              }
+              // Belum login
+              return const WelcomeScreen();
+            },
+          ),
+        ));
   }
 }
 
@@ -86,8 +92,9 @@ class _AuthRedirectScreenState extends State<AuthRedirectScreen> {
   Future<void> _redirect() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
-      if (mounted) Navigator.pushReplacement(context,
-          MaterialPageRoute(builder: (_) => const WelcomeScreen()));
+      if (mounted)
+        Navigator.pushReplacement(
+            context, MaterialPageRoute(builder: (_) => const WelcomeScreen()));
       return;
     }
 
@@ -96,8 +103,9 @@ class _AuthRedirectScreenState extends State<AuthRedirectScreen> {
 
     if (profile == null || profile.isEmpty) {
       // Belum ada profil → ke InputFormScreen
-      if (mounted) Navigator.pushReplacement(context,
-          MaterialPageRoute(builder: (_) => const InputFormScreen()));
+      if (mounted)
+        Navigator.pushReplacement(context,
+            MaterialPageRoute(builder: (_) => const InputFormScreen()));
       return;
     }
 
@@ -106,22 +114,25 @@ class _AuthRedirectScreenState extends State<AuthRedirectScreen> {
         gender: _parseGender(profile['gender'] as String?),
         height: (profile['heightCm'] as num).toDouble(),
         weight: (profile['weightKg'] as num).toDouble(),
-        age: (profile['age'] as num).toInt(),
+        age: CalculatorService.hitungUmurDariTanggalLahir(
+            profile['tanggalLahir'] as DateTime),
         activityLevel: _parseActivity(profile['activityLevel'] as String?),
       );
 
-      if (mounted) Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => ResultsScreen(calculator: calculator)),
-        (route) => false, // hapus semua route sebelumnya
-      );
+      if (mounted)
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => MainShell(calculator: calculator)),
+          (route) => false, // hapus semua route sebelumnya
+        );
     } catch (e) {
       // Error parsing profil → ke InputFormScreen
-      if (mounted) Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const InputFormScreen()),
-        (route) => false,
-      );
+      if (mounted)
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const InputFormScreen()),
+          (route) => false,
+        );
     }
   }
 
@@ -135,11 +146,16 @@ class _AuthRedirectScreenState extends State<AuthRedirectScreen> {
 
   ActivityLevel _parseActivity(String? activity) {
     switch (activity?.toLowerCase()) {
-      case 'ringan': return ActivityLevel.light;
-      case 'sedang': return ActivityLevel.moderate;
-      case 'aktif': return ActivityLevel.active;
-      case 'sangat aktif': return ActivityLevel.veryActive;
-      default: return ActivityLevel.sedentary;
+      case 'ringan':
+        return ActivityLevel.light;
+      case 'sedang':
+        return ActivityLevel.moderate;
+      case 'aktif':
+        return ActivityLevel.active;
+      case 'sangat aktif':
+        return ActivityLevel.veryActive;
+      default:
+        return ActivityLevel.sedentary;
     }
   }
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/local_storage_service.dart';
+import '../services/calculator_service.dart';
 
 class ProfileSummary extends StatefulWidget {
   final VoidCallback? onEdit;
@@ -39,11 +40,26 @@ class _ProfileSummaryState extends State<ProfileSummary> {
 
     final berat = _data['berat'] ?? '';
     final tinggi = _data['tinggi'] ?? '';
-    final usia = _data['usia'] ?? '';
+    final tanggalLahirStr = _data['tanggalLahir'] ?? '';
+    String usia = '';
+    if (tanggalLahirStr.isNotEmpty) {
+      try {
+        final tgl = DateTime.parse(tanggalLahirStr);
+        usia = CalculatorService.hitungUmurDariTanggalLahir(tgl).toString();
+      } catch (_) {
+        usia = '';
+      }
+    }
     final gender = _data['gender'] ?? '';
     final aktivitas = _data['aktivitas'] ?? '';
+    final alergi = _data['alergi'] ?? '';
 
-    final hasAny = berat.isNotEmpty || tinggi.isNotEmpty || usia.isNotEmpty;
+    final hasAny = berat.isNotEmpty ||
+        tinggi.isNotEmpty ||
+        usia.isNotEmpty ||
+        gender.isNotEmpty ||
+        aktivitas.isNotEmpty ||
+        alergi.isNotEmpty;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16.0),
@@ -65,6 +81,7 @@ class _ProfileSummaryState extends State<ProfileSummary> {
                 if (usia.isNotEmpty) _infoChip('Umur', '$usia thn'),
                 if (gender.isNotEmpty) _infoChip('Gender', gender),
                 if (aktivitas.isNotEmpty) _infoChip('Aktivitas', aktivitas),
+                if (alergi.isNotEmpty) _infoChip('Alergi', alergi),
               ]),
             ],
             const SizedBox(height: 8),

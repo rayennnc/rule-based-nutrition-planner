@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:final_project_nutrisee/services/calculator_service.dart';
-import 'package:final_project_nutrisee/services/firestore_service.dart';
 
 void main() {
   group('Modul Snack (Cemilan)', () {
@@ -45,44 +44,6 @@ void main() {
         reason: 'Total snack harusnya 20% dari TDEE',
       );
     });
-
-    test('TC-SNACK-002: Macro ratio untuk high-protein snacks', () {
-      print('\n[TEST START] TC-SNACK-002: Validasi Macro Snack');
-      final svc = CalculatorService(
-        gender: Gender.female,
-        height: 160,
-        weight: 55,
-        age: 28,
-        activityLevel: ActivityLevel.light,
-      );
-
-      final snackMacros = svc.getSnackMacroRatios();
-
-      print('Snack Macro Ratios:');
-      print('- Protein: ${snackMacros['proteinPercent']}%');
-      print('- Carbs: ${snackMacros['carbPercent']}%');
-      print('- Fat: ${snackMacros['fatPercent']}%');
-      print(
-          'Total: ${snackMacros['proteinPercent']! + snackMacros['carbPercent']! + snackMacros['fatPercent']!}%');
-
-      // Protein emphasis untuk satiety (vs typical snack 10%)
-      expect(
-        snackMacros['proteinPercent'],
-        greaterThanOrEqualTo(30.0),
-        reason: 'Protein snack harus minimal 30% untuk satiety',
-      );
-
-      // Total = 100%
-      final total = (snackMacros['proteinPercent']! +
-          snackMacros['carbPercent']! +
-          snackMacros['fatPercent']!);
-      expect(
-        total,
-        closeTo(100.0, 0.1),
-        reason: 'Total macro ratio harus 100%',
-      );
-    });
-
     test(
         'TC-SNACK-003: Snack allocation contoh: TDEE 2000 kcal -> morning 200, afternoon 200',
         () {

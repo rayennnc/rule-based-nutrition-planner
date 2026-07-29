@@ -19,7 +19,19 @@ class CalculatorService {
     this.activityLevel,
   });
 
-  // Validate inputs
+  /// Hitung umur (tahun) dari tanggal lahir, dibandingkan dengan tanggal
+  /// hari ini. Memperhitungkan apakah ulang tahun tahun ini sudah lewat
+  /// atau belum, supaya hasilnya akurat.
+  static int hitungUmurDariTanggalLahir(DateTime tanggalLahir) {
+    final now = DateTime.now();
+    int umur = now.year - tanggalLahir.year;
+    final belumUlangTahunTahunIni = (now.month < tanggalLahir.month) ||
+        (now.month == tanggalLahir.month && now.day < tanggalLahir.day);
+    if (belumUlangTahunTahunIni) umur--;
+    return umur;
+  }
+
+  // Validasi berat badan minimal
   void _validateWeight() {
     if (weight <= 0) {
       throw ArgumentError('Berat badan harus lebih dari 0 kg');
@@ -38,7 +50,7 @@ class CalculatorService {
     }
   }
 
-  // Calculate BMI based on formula
+  // Hitung BMI dengan formula: berat / (tinggi²)
   double calculateBmi() {
     _validateWeight();
     _validateHeight();
@@ -48,7 +60,7 @@ class CalculatorService {
     return double.parse(bmi.toStringAsFixed(1));
   }
 
-  // Get BMI Category based on WHO classification
+  // Kategorisasi BMI sesuai WHO
   String getBmiCategory(double bmi) {
     if (bmi < 18.5) return "Underweight";
     if (bmi >= 18.5 && bmi <= 22.9) return "Normal";
@@ -57,7 +69,7 @@ class CalculatorService {
     return "Obesitas 2";
   }
 
-  // Calculate BMR using Mifflin-St Jeor Equation
+  // Hitung BMR (Basal Metabolic Rate) menggunakan Mifflin-St Jeor
   double calculateBmr() {
     _validateWeight();
     _validateHeight();
@@ -72,8 +84,7 @@ class CalculatorService {
     }
   }
 
-  // Calculate TDEE based on BMR and activity level
-  // Accept nullable activity parameter to allow test of "tidak memilih aktivitas"
+  // Hitung TDEE: BMR × activity multiplier
   int calculateTdee([ActivityLevel? level]) {
     final ActivityLevel? lvl = level ?? activityLevel;
     if (lvl == null) {
@@ -105,7 +116,7 @@ class CalculatorService {
     return (bmr * multiplier).round();
   }
 
-  // Adjust calories based on diet goal
+  // Sesuaikan kalori berdasarkan goal (defisit -500 / maintain / surplus +500)
   int getAdjustedCalories(DietGoal goal, int tdee) {
     switch (goal) {
       case DietGoal.lose:
@@ -122,10 +133,10 @@ class CalculatorService {
   // ===== SNACK ALLOCATION (Cemilan) =====
   // Based on research (Bermingham et al., 2024): 20% of daily calories allocated to snacks
   // Split: 10% morning snack (10:00 AM), 10% afternoon snack (4:00 PM)
-  // Purpose: appetite control & blood glucose stability through high-protein snacking
+  // Purpose: appetite control & blood glucose stability through balanced snack choices
 
-  /// Calculate snack calorie allocation from TDEE
-  /// Returns map with morning and afternoon snack targets (in calories)
+  /// Alokasi cemilan: 10% pagi + 10% sore dari TDEE (total 20%)
+  /// Berdasarkan penelitian untuk kontrol nafsu makan
   Map<String, int> calculateSnackAllocation(int tdee) {
     // Morning and afternoon snack shown as 10% each (rounded)
     final int morningSnackCal = (tdee * 0.10).round();
@@ -139,25 +150,6 @@ class CalculatorService {
       'morningSnack': morningSnackCal,
       'afternoonSnack': afternoonSnackCal,
       'totalSnackCal': totalSnackCal,
-    };
-  }
-
-  /// Get recommended macronutrient ratios for high-protein snacks
-  ///
-  /// Research insight (Almoraie et al., 2021):
-  /// - High-protein snacks provide superior satiety vs carb/fat-dominant snacks
-  /// - Helps control appetite & reduce empty calorie consumption
-  /// - Improves snack diet quality (SDI - Snack Diet Index)
-  ///
-  /// Recommended ratio for snacks (vs typical snacking behavior):
-  /// - Protein: 35% (vs current pattern: 10%) ← EMPHASIS
-  /// - Carbs: 45% (vs current pattern: 58%)
-  /// - Fat: 20% (vs current pattern: 32%)
-  Map<String, double> getSnackMacroRatios() {
-    return {
-      'proteinPercent': 35.0, // High-protein for satiety
-      'carbPercent': 45.0, // Moderate carbs
-      'fatPercent': 20.0, // Lower fat
     };
   }
 }

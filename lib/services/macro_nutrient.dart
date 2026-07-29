@@ -17,8 +17,8 @@ class MacroNutrient {
     proteinPercent: 15.0,
   );
 
-  // 2. High Protein (Untuk Atlet/Active Users)
-  static const MacroNutrient highProtein = MacroNutrient(
+  // 2. Performance (Untuk Atlet/Active Users)
+  static const MacroNutrient performance = MacroNutrient(
     carbPercent: 50.0,
     fatPercent: 20.0,
     proteinPercent: 30.0,
@@ -90,12 +90,9 @@ class MacroNutrient {
     // Karbo & Protein = 4 kal/gram
     // Lemak = 9 kal/gram
 
-    double carbGrams =
-        (totalCalories * carbPercent / 100) / 4;
-    double proteinGrams =
-        (totalCalories * proteinPercent / 100) / 4;
-    double fatGrams =
-        (totalCalories * fatPercent / 100) / 9;
+    double carbGrams = (totalCalories * carbPercent / 100) / 4;
+    double proteinGrams = (totalCalories * proteinPercent / 100) / 4;
+    double fatGrams = (totalCalories * fatPercent / 100) / 9;
 
     return {
       'carbs': double.parse(carbGrams.toStringAsFixed(1)),

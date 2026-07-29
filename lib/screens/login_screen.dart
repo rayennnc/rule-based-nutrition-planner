@@ -14,7 +14,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailCtl = TextEditingController();
   final _passCtl = TextEditingController();
   final AuthService _auth = AuthService();
-  bool _loading = false;
+  bool _loading = false; // flag untuk menonaktifkan tombol saat login berlangsung // flag untuk menonaktifkan tombol saat login berlangsung
 
   @override
   void dispose() {
@@ -25,13 +25,14 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
+    // tampilkan loading saat permintaan login dikirim
     setState(() => _loading = true);
     try {
       final cred = await _auth.signInWithEmail(
           _emailCtl.text.trim(), _passCtl.text.trim());
       debugPrint('SignIn success uid=${cred.user?.uid}');
 
-      // explicit navigation — jangan tunggu StreamBuilder
+      // langsung ke halaman input setelah login berhasil
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/input');
       }
@@ -58,6 +59,7 @@ class _LoginScreenState extends State<LoginScreen> {
         child: Form(
           key: _formKey,
           child: Column(children: [
+            // input email pengguna, pakai validator sederhana
             TextFormField(
               controller: _emailCtl,
               decoration: const InputDecoration(
@@ -67,6 +69,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   v == null || v.isEmpty ? 'Masukkan email' : null,
             ),
             const SizedBox(height: 12),
+            // input password pengguna, ditutup agar tidak tampil teks
             TextFormField(
               controller: _passCtl,
               decoration: const InputDecoration(
@@ -76,12 +79,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   v == null || v.isEmpty ? 'Masukkan password' : null,
             ),
             const SizedBox(height: 16),
+            // tombol login, nonaktif saat proses login berjalan
             ElevatedButton(
               onPressed: _loading ? null : _login,
               child: _loading
                   ? const CircularProgressIndicator(color: Colors.white)
                   : const Text('Login'),
             ),
+            // buka layar pendaftaran jika pengguna belum punya akun
             TextButton(
               onPressed: () => Navigator.push(context,
                   MaterialPageRoute(builder: (_) => const RegisterScreen())),

@@ -3,30 +3,36 @@ import 'package:shared_preferences/shared_preferences.dart';
 class LocalStorageService {
   // --- DAFTAR KUNCI RAHASIA (KEY) ---
   // Ini seperti label pada laci penyimpanan agar tidak tertukar
+  static const String _keyNama = 'nama_user';
   static const String _keyBerat = 'berat_badan';
   static const String _keyTinggi = 'tinggi_badan';
-  static const String _keyUsia = 'usia';
+  static const String _keyTanggalLahir = 'tanggal_lahir';
   static const String _keyGender = 'jenis_kelamin';
   static const String _keyAktivitas = 'level_aktivitas';
+  static const String _keyAllergies = 'alergi_bahan';
   static const String _keyMacros = 'prefs_macros';
 
   // 1. FUNGSI SIMPAN (Save)
   // Dipanggil saat user menekan tombol "Hitung"
   Future<void> simpanDataUser({
+    required String nama,
     required String berat,
     required String tinggi,
-    required String usia,
+    required String tanggalLahir,
     required String gender,
     required String aktivitas,
+    String alergi = '',
   }) async {
     final prefs = await SharedPreferences.getInstance();
 
     // Simpan data ke memori HP
+    await prefs.setString(_keyNama, nama);
     await prefs.setString(_keyBerat, berat);
     await prefs.setString(_keyTinggi, tinggi);
-    await prefs.setString(_keyUsia, usia);
+    await prefs.setString(_keyTanggalLahir, tanggalLahir);
     await prefs.setString(_keyGender, gender);
     await prefs.setString(_keyAktivitas, aktivitas);
+    await prefs.setString(_keyAllergies, alergi);
 
     print("Data user berhasil disimpan di HP! ✅");
   }
@@ -39,13 +45,15 @@ class LocalStorageService {
     // Ambil data, kalau kosong (null) kita kasih nilai default string kosong ''
     // Agar text controller tidak error
     return {
+      'nama': prefs.getString(_keyNama) ?? '',
       'berat': prefs.getString(_keyBerat) ?? '',
       'tinggi': prefs.getString(_keyTinggi) ?? '',
-      'usia': prefs.getString(_keyUsia) ?? '',
+      'tanggalLahir': prefs.getString(_keyTanggalLahir) ?? '',
       'gender':
           prefs.getString(_keyGender) ?? 'Laki - Laki', // Default dropdown
       'aktivitas':
           prefs.getString(_keyAktivitas) ?? 'Ringan', // Default dropdown
+      'alergi': prefs.getString(_keyAllergies) ?? '',
     };
   }
 

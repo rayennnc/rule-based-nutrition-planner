@@ -49,3 +49,8 @@ app.*.map.json
 
 # folder dan file skripsi
 /skripsi/
+/all of md/
+
+.gradle/
+local.properties
+.pub/

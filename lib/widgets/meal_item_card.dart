@@ -10,6 +10,7 @@ class MealItemCard extends StatefulWidget {
   final bool selectable; // apakah card bisa dipilih sebagai opsi utama
   final bool isSelected; // tampilkan highlight jika terpilih
   final void Function(FoodItem)? onSelect; // callback ketika dipilih
+  final List<String>? excludedAllergens;
   // callback untuk memberitahu parent jika nutrisi berubah (misalnya saat swap)
   // nilai yang dikirim sudah direfleksikan berdasarkan berat / porsi saat ini
   final void Function(
@@ -24,6 +25,7 @@ class MealItemCard extends StatefulWidget {
     this.selectable = false,
     this.isSelected = false,
     this.onSelect,
+    this.excludedAllergens,
     this.onNutritionChanged,
   }) : super(key: key);
 
@@ -62,8 +64,10 @@ class _MealItemCardState extends State<MealItemCard> {
     setState(() => isSwapping = true);
 
     // 1. Ambil Kandidat Pengganti (Aman Kuota karena pakai Cache)
-    List<FoodItem> candidates =
-        await _firestoreService.getFoodCandidates(widget.category);
+    List<FoodItem> candidates = await _firestoreService.getFoodCandidates(
+      widget.category,
+      excludeAllergens: widget.excludedAllergens,
+    );
 
     // Filter: Buang makanan yang sedang tampil sekarang
     var filtered = candidates.where((f) => f.id != currentFood.id).toList();
@@ -115,6 +119,14 @@ class _MealItemCardState extends State<MealItemCard> {
     // (random swap tetap memakai kategori agar lebih cocok otomatis).
     List<FoodItem> candidates = await _firestoreService.getAllFoodItems();
 
+    // Filter alergi sebelum menampilkan search
+    if (widget.excludedAllergens != null &&
+        widget.excludedAllergens!.isNotEmpty) {
+      candidates = candidates
+          .where((item) => !item.matchesAllergens(widget.excludedAllergens))
+          .toList();
+    }
+
     // Buang makanan yang sedang tampil sekarang
     var filtered = candidates.where((f) => f.id != currentFood.id).toList();
 
@@ -132,6 +144,7 @@ class _MealItemCardState extends State<MealItemCard> {
       delegate: FoodSearch(
         foodList: filtered,
         initialCategory: widget.category,
+        allergens: widget.excludedAllergens,
         onItemTap: (FoodItem item) {
           // Validasi kalori
           if (item.calories <= 0) {
