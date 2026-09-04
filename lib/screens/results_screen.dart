@@ -173,10 +173,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
         _bmr = _calculator.calculateBmr();
         _tdee = _calculator.calculateTdee();
         // Clear cached menus so they regenerate with new targets
-        _mealFutures.clear();
-        _snackFutures.clear();
-        _dailyMenuCache = null;
-        _currentMealsData.clear();
+        _invalidateMenuCaches(alsoDailyMenuCache: true);
       });
       _prepareAllSectionFutures();
     }
@@ -274,10 +271,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
           if (invalidCache) {
             debugPrint(
                 '⚠️ Cached daily menu berisi makanan yang harus dihindari, menu lama diabaikan');
-            _mealFutures.clear();
-            _snackFutures.clear();
-            _allLoadedMeals.clear();
-            _dailyMenuCache = null;
+            _invalidateMenuCaches(alsoDailyMenuCache: true);
             return;
           }
         }
@@ -423,18 +417,28 @@ class _ResultsScreenState extends State<ResultsScreen> {
     }
   }
 
+  // Invalidate semua cache menu/snack sekaligus, biar regenerasi berikutnya
+  // fresh. Disatukan di sini karena manual .clear() tersebar di banyak tempat
+  // itu sendiri sumber bug (macro customization dulu cuma clear _mealFutures,
+  // tombol "Ubah Tujuan Diet" dulu gak clear _snackFutures/_allLoadedMeals —
+  // dua-duanya kena pola bug yang sama kayak yang udah pernah diperbaiki di sini).
+  void _invalidateMenuCaches({bool alsoDailyMenuCache = false}) {
+    _mealFutures.clear();
+    _snackFutures.clear();
+    _allLoadedMeals.clear();
+    _currentMealsData.clear();
+    if (alsoDailyMenuCache) {
+      _dailyMenuCache = null;
+    }
+  }
+
   // Tetapkan tujuan diet dan regenerasi menu yang relevan.
   void _setDietGoal(DietGoal goal) {
     // set tujuan diet dan kalori harian yang sesuai
     // Clear cached menus and tracked nutrition so we don't accumulate old values
     // (previous bug: changing goal left old _allLoadedMeals/_currentMealsData)
     setState(() {
-      // clear cached generated menus so new ones are generated
-      _mealFutures.clear();
-      _snackFutures.clear();
-      _allLoadedMeals.clear();
-      // remove any per-card nutrition entries
-      _currentMealsData.clear();
+      _invalidateMenuCaches();
 
       _selectedGoal = goal;
       _finalCalories = _calculator.getAdjustedCalories(goal, _tdee);
@@ -484,8 +488,11 @@ class _ResultsScreenState extends State<ResultsScreen> {
             // update preferensi makro dan re-generate menu jika pengguna menyimpan
             setState(() {
               _selectedMacro = macro;
-              // Invalidate cached meal futures so they regenerate with new ratios
-              _mealFutures.clear();
+              // Invalidate ALL cached menu data so meals AND snacks regenerate
+              // with the new macro ratios (snacks read _selectedMacro too, see
+              // _buildSnackFuture — this used to only clear _mealFutures here,
+              // which left snack recommendations stale after a macro change)
+              _invalidateMenuCaches();
             });
 
             // Prefetch new meals with updated macro ratios
@@ -558,8 +565,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
                 setState(() {
                   _selectedGoal = null;
                   _finalCalories = null;
-                  _mealFutures.clear();
-                  _currentMealsData.clear();
+                  _invalidateMenuCaches();
                 });
               },
             ),
