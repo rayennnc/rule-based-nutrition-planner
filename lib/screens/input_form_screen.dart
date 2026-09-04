@@ -264,8 +264,8 @@ class _InputFormScreenState extends State<InputFormScreen> {
       // Simpan profil user ke Firestore di background.
       _saveProfileToFirestore(
         nama: _namaController.text,
-        berat: double.parse(_weightController.text),
-        tinggi: double.parse(_heightController.text),
+        berat: double.parse(_weightController.text.replaceAll(',', '.')),
+        tinggi: double.parse(_heightController.text.replaceAll(',', '.')),
         tanggalLahir: _selectedTanggalLahir!,
         gender: genderStr,
         aktivitas: activityStr,
