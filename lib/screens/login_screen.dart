@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../auth/auth_service.dart';
 import 'register_screen.dart';
+import 'auth_redirect_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -14,7 +15,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailCtl = TextEditingController();
   final _passCtl = TextEditingController();
   final AuthService _auth = AuthService();
-  bool _loading = false; // flag untuk menonaktifkan tombol saat login berlangsung // flag untuk menonaktifkan tombol saat login berlangsung
+  bool _loading = false; // flag untuk menonaktifkan tombol saat login berlangsung
 
   @override
   void dispose() {
@@ -32,9 +33,12 @@ class _LoginScreenState extends State<LoginScreen> {
           _emailCtl.text.trim(), _passCtl.text.trim());
       debugPrint('SignIn success uid=${cred.user?.uid}');
 
-      // langsung ke halaman input setelah login berhasil
+      // Cek profil dulu (sama kayak alur relaunch app di main.dart) —
+      // kalau profil udah lengkap, langsung ke MainShell, bukan form input lagi.
       if (mounted) {
-        Navigator.of(context).pushReplacementNamed('/input');
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const AuthRedirectScreen()),
+        );
       }
     } on FirebaseAuthException catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
