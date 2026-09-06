@@ -138,35 +138,10 @@ class _InputFormScreenState extends State<InputFormScreen> {
         _allergyKacang = allergiRaw.contains('kacang');
         _allergyTelur = allergiRaw.contains('telur');
 
-        // Konversi string Firestore/local menjadi enum Gender.
-        if (finalData['gender'] == 'Laki - Laki') {
-          _selectedGender = Gender.male;
-        } else if (finalData['gender'] == 'Perempuan') {
-          _selectedGender = Gender.female;
-        }
-
-        // Isi Dropdown Aktivitas (Konversi String -> Enum)
-        String activityStr = finalData['aktivitas'] ?? 'Sedang';
-        // Konversi string aktivitas menjadi enum ActivityLevel.
-        switch (activityStr) {
-          case 'Tidak Bergerak Banyak':
-            _selectedActivityLevel = ActivityLevel.sedentary;
-            break;
-          case 'Ringan':
-            _selectedActivityLevel = ActivityLevel.light;
-            break;
-          case 'Sedang':
-            _selectedActivityLevel = ActivityLevel.moderate;
-            break;
-          case 'Aktif':
-            _selectedActivityLevel = ActivityLevel.active;
-            break;
-          case 'Sangat Aktif':
-            _selectedActivityLevel = ActivityLevel.veryActive;
-            break;
-          default:
-            _selectedActivityLevel = ActivityLevel.moderate;
-        }
+        // null kalau ga match, biar user pilih ulang di dropdown
+        _selectedGender = GenderParsing.tryFromLabel(finalData['gender']);
+        _selectedActivityLevel =
+            ActivityLevelParsing.tryFromLabel(finalData['aktivitas']);
       });
     }
   }
@@ -225,28 +200,9 @@ class _InputFormScreenState extends State<InputFormScreen> {
   Future<void> _calculate() async {
     if (_formKey.currentState!.validate()) {
       // Simpan input ke lokal sebelum navigasi.
-      String genderStr =
-          _selectedGender == Gender.male ? 'Laki - Laki' : 'Perempuan';
-
-      String activityStr = 'Ringan';
-      // Convert enum aktivitas ke label yang bisa disimpan.
-      switch (_selectedActivityLevel!) {
-        case ActivityLevel.sedentary:
-          activityStr = 'Tidak Bergerak Banyak';
-          break;
-        case ActivityLevel.light:
-          activityStr = 'Ringan';
-          break;
-        case ActivityLevel.moderate:
-          activityStr = 'Sedang';
-          break;
-        case ActivityLevel.active:
-          activityStr = 'Aktif';
-          break;
-        case ActivityLevel.veryActive:
-          activityStr = 'Sangat Aktif';
-          break;
-      }
+      // udah lolos validator, aman pakai !
+      final String genderStr = _selectedGender!.label;
+      final String activityStr = _selectedActivityLevel!.label;
 
       final allergyStr = _buildAllergyString();
 

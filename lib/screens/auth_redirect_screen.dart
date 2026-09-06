@@ -6,11 +6,9 @@ import '../widgets/main_shell.dart';
 import 'welcome_screen.dart';
 import 'input_form_screen.dart';
 
-/// Screen perantara: load profil dari Firebase lalu arahkan ke ResultsScreen
-/// (lewat MainShell) kalau profil sudah lengkap, atau ke InputFormScreen
-/// kalau belum. Dipakai dari dua tempat: main.dart (saat app dibuka dalam
-/// keadaan sudah login) dan login_screen.dart (setelah login manual berhasil)
-/// — supaya kedua alur itu konsisten dan gak ada yang bypass pengecekan ini.
+/// Screen perantara: cek profil di Firebase, lempar ke ResultsScreen kalau
+/// udah lengkap, atau ke InputFormScreen kalau belum. Dipake dari main.dart
+/// dan login_screen.dart biar dua-duanya konsisten.
 class AuthRedirectScreen extends StatefulWidget {
   const AuthRedirectScreen({super.key});
 
@@ -49,14 +47,28 @@ class _AuthRedirectScreenState extends State<AuthRedirectScreen> {
       return;
     }
 
+    // gender nentuin rumus BMR - kalau ga kebaca, jangan ditebak
+    final gender = GenderParsing.tryFromLabel(profile['gender'] as String?);
+    if (gender == null) {
+      if (mounted) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const InputFormScreen()),
+          (route) => false,
+        );
+      }
+      return;
+    }
+
     try {
       final calculator = CalculatorService(
-        gender: _parseGender(profile['gender'] as String?),
+        gender: gender,
         height: (profile['heightCm'] as num).toDouble(),
         weight: (profile['weightKg'] as num).toDouble(),
         age: CalculatorService.hitungUmurDariTanggalLahir(
             profile['tanggalLahir'] as DateTime),
-        activityLevel: _parseActivity(profile['activityLevel'] as String?),
+        activityLevel:
+            ActivityLevelParsing.tryFromLabel(profile['activityLevel'] as String?),
       );
 
       if (mounted) {
@@ -67,7 +79,8 @@ class _AuthRedirectScreenState extends State<AuthRedirectScreen> {
         );
       }
     } catch (e) {
-      // Error parsing profil → ke InputFormScreen
+      // Error parsing profil (heightCm/weightKg/tanggalLahir corrupt, dll) →
+      // ke InputFormScreen
       if (mounted) {
         Navigator.pushAndRemoveUntil(
           context,
@@ -75,33 +88,6 @@ class _AuthRedirectScreenState extends State<AuthRedirectScreen> {
           (route) => false,
         );
       }
-    }
-  }
-
-  // TODO(konsolidasi): parsing Gender/ActivityLevel string<->enum ini juga
-  // diimplementasi ulang di profile_notifier.dart & input_form_screen.dart,
-  // dengan default fallback yang beda-beda. Belum disatukan di batch ini —
-  // lihat catatan "known issues #2" di Project Instructions.
-  Gender _parseGender(String? gender) {
-    final g = gender?.toLowerCase() ?? '';
-    if (g == 'laki-laki' || g == 'laki - laki' || g == 'male') {
-      return Gender.male;
-    }
-    return Gender.female;
-  }
-
-  ActivityLevel _parseActivity(String? activity) {
-    switch (activity?.toLowerCase()) {
-      case 'ringan':
-        return ActivityLevel.light;
-      case 'sedang':
-        return ActivityLevel.moderate;
-      case 'aktif':
-        return ActivityLevel.active;
-      case 'sangat aktif':
-        return ActivityLevel.veryActive;
-      default:
-        return ActivityLevel.sedentary;
     }
   }
 

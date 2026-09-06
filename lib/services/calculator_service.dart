@@ -4,6 +4,61 @@ enum ActivityLevel { sedentary, light, moderate, active, veryActive }
 
 enum DietGoal { lose, maintain, gain }
 
+// Dulu Gender/Activity parsing ada sendiri-sendiri di 3 file beda, disatuin di sini.
+extension GenderParsing on Gender {
+  // null kalau ga match apapun - jangan asal tebak, soalnya nentuin rumus BMR
+  static Gender? tryFromLabel(String? label) {
+    final g = label?.toLowerCase().trim() ?? '';
+    if (g == 'laki-laki' || g == 'laki - laki' || g == 'male') {
+      return Gender.male;
+    }
+    if (g == 'perempuan' || g == 'female') {
+      return Gender.female;
+    }
+    return null;
+  }
+
+  String get label => this == Gender.male ? 'Laki - Laki' : 'Perempuan';
+}
+
+// Sama kayak GenderParsing. Aman dikasih default (sedentary) karena cuma
+// pengali TDEE, beda sama Gender yang nentuin rumus.
+extension ActivityLevelParsing on ActivityLevel {
+  static ActivityLevel tryFromLabel(String? label) {
+    switch (label?.toLowerCase().trim()) {
+      case 'ringan':
+        return ActivityLevel.light;
+      case 'sedang':
+        return ActivityLevel.moderate;
+      case 'aktif':
+        return ActivityLevel.active;
+      case 'sangat aktif':
+        return ActivityLevel.veryActive;
+      case 'tidak bergerak banyak':
+      case 'tidak bergerak':
+      case 'sedentary':
+        return ActivityLevel.sedentary;
+      default:
+        return ActivityLevel.sedentary;
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case ActivityLevel.sedentary:
+        return 'Tidak Bergerak Banyak';
+      case ActivityLevel.light:
+        return 'Ringan';
+      case ActivityLevel.moderate:
+        return 'Sedang';
+      case ActivityLevel.active:
+        return 'Aktif';
+      case ActivityLevel.veryActive:
+        return 'Sangat Aktif';
+    }
+  }
+}
+
 class CalculatorService {
   final Gender gender;
   final double height; // in cm

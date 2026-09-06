@@ -38,27 +38,11 @@ class ProfileNotifier extends ChangeNotifier {
         }
       }
 
-      final genderStr = (_data['gender'] ?? '').toLowerCase();
-      final aktivitas = (_data['aktivitas'] ?? '').toLowerCase();
+      final gender = GenderParsing.tryFromLabel(_data['gender']);
+      final activity = ActivityLevelParsing.tryFromLabel(_data['aktivitas']);
 
-      Gender gender = Gender.male;
-      if (genderStr.contains('perempuan') || genderStr.contains('female')) {
-        gender = Gender.female;
-      }
-
-      ActivityLevel activity = ActivityLevel.moderate;
-      if (aktivitas.contains('tidak') || aktivitas.contains('sedentary'))
-        activity = ActivityLevel.sedentary;
-      else if (aktivitas.contains('ringan'))
-        activity = ActivityLevel.light;
-      else if (aktivitas.contains('sedang'))
-        activity = ActivityLevel.moderate;
-      else if (aktivitas.contains('aktif') && !aktivitas.contains('sangat'))
-        activity = ActivityLevel.active;
-      else if (aktivitas.contains('sangat') || aktivitas.contains('very'))
-        activity = ActivityLevel.veryActive;
-
-      if (berat > 0 && tinggi > 0 && usia > 0) {
+      // gender null = data belum lengkap, samain kayak berat/tinggi/usia kosong
+      if (berat > 0 && tinggi > 0 && usia > 0 && gender != null) {
         _calculator = CalculatorService(
           gender: gender,
           weight: berat,
