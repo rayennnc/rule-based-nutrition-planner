@@ -33,8 +33,7 @@ class _LoginScreenState extends State<LoginScreen> {
           _emailCtl.text.trim(), _passCtl.text.trim());
       debugPrint('SignIn success uid=${cred.user?.uid}');
 
-      // Cek profil dulu (sama kayak alur relaunch app di main.dart) —
-      // kalau profil udah lengkap, langsung ke MainShell, bukan form input lagi.
+      // Cek profil dulu, sama kayak alur relaunch app di main.dart
       if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const AuthRedirectScreen()),
