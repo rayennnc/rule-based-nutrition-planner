@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/firestore_service.dart'; // Sesuaikan path import
+import '../widgets/food_image.dart';
 
 class FoodSearch extends SearchDelegate {
   final List<FoodItem> foodList; // daftar makanan yang bisa dicari
@@ -170,7 +171,7 @@ class FoodSearch extends SearchDelegate {
                           height: 50,
                           child: (item.imageUrl != null &&
                                   item.imageUrl!.isNotEmpty)
-                              ? _buildImageWidget(item.imageUrl!)
+                              ? buildFoodImage(item.imageUrl!)
                               : const Icon(Icons.fastfood, color: Colors.grey),
                         ),
                       ),
@@ -204,37 +205,4 @@ class FoodSearch extends SearchDelegate {
       ],
     );
   }
-}
-
-Widget _buildImageWidget(String imageUrl) {
-  // 1. Asset lokal — prefix 'asset:' (tanpa slash, pakai colon)
-  if (imageUrl.startsWith('asset:')) {
-    final assetPath = imageUrl.substring(6); // strip prefix 'asset:'
-    return Image.asset(
-      assetPath,
-      fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) =>
-          const Icon(Icons.broken_image, color: Colors.grey),
-    );
-  }
-
-  // 2. Base64 data URI (legacy)
-  if (imageUrl.startsWith('data:')) {
-    try {
-      return Image.memory(
-        Uri.parse(imageUrl).data!.contentAsBytes(),
-        fit: BoxFit.cover,
-      );
-    } catch (e) {
-      return const Center(child: Icon(Icons.broken_image, color: Colors.grey));
-    }
-  }
-
-  // 3. URL internet (http/https)
-  return Image.network(
-    imageUrl,
-    fit: BoxFit.cover,
-    errorBuilder: (context, error, stackTrace) =>
-        const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
-  );
 }

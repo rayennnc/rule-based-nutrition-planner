@@ -7,12 +7,11 @@ import '../services/macro_nutrient.dart'; // add import
 import '../services/local_storage_service.dart';
 import '../screens/macro_customization.dart'; // add import
 import '../screens/food_search.dart'; // add import
-import '../screens/input_form_screen.dart'; // add import
 import '../auth/auth_service.dart';
 import '../widgets/meal_item_card.dart'; // add import
+import '../widgets/food_image.dart';
 import 'package:provider/provider.dart';
 import '../models/profile_notifier.dart';
-// ignore_for_file: unused_field, unused_local_variable
 
 class ResultsScreen extends StatefulWidget {
   final CalculatorService calculator;
@@ -417,11 +416,8 @@ class _ResultsScreenState extends State<ResultsScreen> {
     }
   }
 
-  // Invalidate semua cache menu/snack sekaligus, biar regenerasi berikutnya
-  // fresh. Disatukan di sini karena manual .clear() tersebar di banyak tempat
-  // itu sendiri sumber bug (macro customization dulu cuma clear _mealFutures,
-  // tombol "Ubah Tujuan Diet" dulu gak clear _snackFutures/_allLoadedMeals —
-  // dua-duanya kena pola bug yang sama kayak yang udah pernah diperbaiki di sini).
+  // Clear semua cache sekaligus - dulu di-clear manual di beberapa tempat
+  // dan suka ada yang kelewat (itu penyebab bug macro/snack kemarin).
   void _invalidateMenuCaches({bool alsoDailyMenuCache = false}) {
     _mealFutures.clear();
     _snackFutures.clear();
@@ -488,11 +484,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
             // update preferensi makro dan re-generate menu jika pengguna menyimpan
             setState(() {
               _selectedMacro = macro;
-              // Invalidate ALL cached menu data so meals AND snacks regenerate
-              // with the new macro ratios (snacks read _selectedMacro too, see
-              // _buildSnackFuture — this used to only clear _mealFutures here,
-              // which left snack recommendations stale after a macro change)
-              _invalidateMenuCaches();
+              _invalidateMenuCaches(); // termasuk snack, bukan cuma meal
             });
 
             // Prefetch new meals with updated macro ratios
@@ -1246,7 +1238,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: item.imageUrl != null
-                    ? _buildImageWidget(item.imageUrl!)
+                    ? buildFoodImage(item.imageUrl!)
                     : const Icon(Icons.fastfood, color: Colors.grey),
               ),
             ),
@@ -1355,7 +1347,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(15),
                         child: item.imageUrl != null
-                            ? _buildImageWidget(item.imageUrl!)
+                            ? buildFoodImage(item.imageUrl!)
                             : const Icon(Icons.fastfood,
                                 size: 80, color: Colors.grey),
                       ),
@@ -1658,43 +1650,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
         Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
       ],
     );
-  }
-
-  // Render gambar dari asset, data URL, atau network.
-  // Helper method to load image (supports data URL and external URL)
-  Widget _buildImageWidget(String imageUrl) {
-    // asset prefix is easiest for offline images
-    if (imageUrl.startsWith('asset:')) {
-      final assetPath = imageUrl.substring(6);
-      return Image.asset(assetPath,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => const Center(
-                child: Icon(Icons.broken_image, color: Colors.grey),
-              ));
-    }
-
-    if (imageUrl.startsWith('data:')) {
-      // Data URL (base64)
-      try {
-        return Image.memory(
-          Uri.parse(imageUrl).data!.contentAsBytes(),
-          fit: BoxFit.cover,
-        );
-      } catch (e) {
-        return const Center(
-          child: Icon(Icons.broken_image, color: Colors.grey),
-        );
-      }
-    } else {
-      // External URL
-      return Image.network(
-        imageUrl,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => const Center(
-          child: Icon(Icons.broken_image, color: Colors.grey),
-        ),
-      );
-    }
   }
 
   // Tampilkan kartu ringkasan IMT.

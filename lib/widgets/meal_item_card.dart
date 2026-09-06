@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/firestore_service.dart';
 import '../screens/food_search.dart';
+import 'food_image.dart';
 
 class MealItemCard extends StatefulWidget {
   final FoodItem foodItem; // Data makanan awal
@@ -233,7 +234,7 @@ class _MealItemCardState extends State<MealItemCard> {
                   borderRadius: BorderRadius.circular(8),
                   child: (currentFood.imageUrl != null &&
                           currentFood.imageUrl!.trim().isNotEmpty)
-                      ? _buildImageWidget(currentFood.imageUrl!)
+                      ? buildFoodImage(currentFood.imageUrl!)
                       : const Icon(Icons.fastfood, color: Colors.grey),
                 ),
               ),
@@ -320,35 +321,6 @@ class _MealItemCardState extends State<MealItemCard> {
     );
   }
 
-  // --- HELPER UI ---
-  Widget _buildImageWidget(String imageUrl) {
-    // support three forms of URL:
-    // 1. asset:foto.jpg   -> load from bundled assets (no network)
-    // 2. data:...        -> base64 data URI (legacy, decoded in memory)
-    // 3. https://...     -> remote URL via network
-
-    if (imageUrl.startsWith('asset:')) {
-      // strip prefix and load from assets directory
-      final assetPath = imageUrl.substring(6);
-      return Image.asset(assetPath,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image));
-    }
-
-    if (imageUrl.startsWith('data:')) {
-      try {
-        return Image.memory(Uri.parse(imageUrl).data!.contentAsBytes(),
-            fit: BoxFit.cover);
-      } catch (e) {
-        return const Icon(Icons.broken_image, color: Colors.grey);
-      }
-    } else {
-      return Image.network(imageUrl,
-          fit: BoxFit.cover,
-          errorBuilder: (c, e, s) => const Icon(Icons.broken_image));
-    }
-  }
-
   void _showFoodDetail(BuildContext context, FoodItem item) {
     showModalBottomSheet(
       context: context,
@@ -387,7 +359,7 @@ class _MealItemCardState extends State<MealItemCard> {
                       child: ClipRRect(
                           borderRadius: BorderRadius.circular(15),
                           child: item.imageUrl != null
-                              ? _buildImageWidget(item.imageUrl!)
+                              ? buildFoodImage(item.imageUrl!)
                               : const Icon(Icons.fastfood,
                                   size: 80, color: Colors.grey)),
                     ),
