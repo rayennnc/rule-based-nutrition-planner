@@ -355,6 +355,281 @@ class MealCombination {
           .abs();
 }
 
+// ===== LOGIC SNACK YANG DITARIK KELUAR BIAR BISA DITEST =====
+// Dulu ini private method di dalam FirestoreService, tapi class itu punya
+// field `_db = FirebaseFirestore.instance` yang langsung jalan pas
+// di-construct - jadi FirestoreService() aja udah crash di unit test tanpa
+// Firebase ke-init. Fungsi di bawah ini nggak nyentuh Firestore sama
+// sekali, makanya ditarik jadi top-level biar bisa langsung ditest.
+
+bool isHighQualitySnack(FoodItem food) {
+  final highQualityCategories = [
+    'buah',
+    'sayur',
+    'kacang',
+    'biji-bijian',
+    'dairy',
+    'yogurt',
+    'keju',
+    'nuts',
+    'seeds',
+  ];
+
+  final category = food.kategori.toLowerCase();
+  final name = food.name.toLowerCase();
+
+  final isCategoryMatched = highQualityCategories.any(
+    (hq) => category.contains(hq),
+  );
+
+  final isLowQuality = name.contains('kue') ||
+      name.contains('cookies') ||
+      name.contains('permen') ||
+      name.contains('candy') ||
+      name.contains('cokelat') ||
+      name.contains('chocolate') ||
+      name.contains('soda') ||
+      name.contains('minuman manis') ||
+      category.contains('kue') ||
+      category.contains('candy');
+
+  return isCategoryMatched && !isLowQuality;
+}
+
+double calculateProteinPercent(FoodItem food) {
+  if (food.calories == 0) return 0;
+  final proteinCal = food.protein.toDouble() * 4;
+  return (proteinCal / food.calories) * 100;
+}
+
+double calculateCarbPercent(FoodItem food) {
+  if (food.calories == 0) return 0;
+  final carbCal = food.carbs.toDouble() * 4;
+  return (carbCal / food.calories) * 100;
+}
+
+double calculateFatPercent(FoodItem food) {
+  if (food.calories == 0) return 0;
+  final fatCal = food.fat.toDouble() * 9;
+  return (fatCal / food.calories) * 100;
+}
+
+/// Versi murni dari getHighQualitySnacks - nerima allFoods langsung
+/// (bukan fetch dari Firestore sendiri), jadi bisa langsung ditest.
+List<FoodItem> filterHighQualitySnacks(
+    List<FoodItem> allFoods, int targetCalories,
+    {List<String>? excludeAllergens}) {
+  final snacks = allFoods
+      .where((f) => !f.matchesAllergens(excludeAllergens))
+      .where(isHighQualitySnack)
+      .toList();
+
+  final exactMatch =
+      snacks.where((f) => f.calories == targetCalories).toList();
+  if (exactMatch.isNotEmpty) {
+    exactMatch.sort((a, b) {
+      final diffA = (a.calories - targetCalories).abs();
+      final diffB = (b.calories - targetCalories).abs();
+      return diffA.compareTo(diffB);
+    });
+    return exactMatch;
+  }
+
+  final tolerance = (targetCalories * 0.15).ceil();
+  final filtered = snacks.where((f) {
+    final diff = (f.calories - targetCalories).abs();
+    return diff <= tolerance && f.calories <= targetCalories;
+  }).toList();
+
+  if (filtered.isNotEmpty) {
+    filtered.sort((a, b) {
+      final diffA = (a.calories - targetCalories).abs();
+      final diffB = (b.calories - targetCalories).abs();
+      return diffA.compareTo(diffB);
+    });
+    return filtered;
+  }
+
+  final overshootFallback = snacks.where((f) {
+    final diff = (f.calories - targetCalories).abs();
+    return diff <= tolerance;
+  }).toList();
+
+  overshootFallback.sort((a, b) {
+    final diffA = (a.calories - targetCalories).abs();
+    final diffB = (b.calories - targetCalories).abs();
+    return diffA.compareTo(diffB);
+  });
+
+  return overshootFallback;
+}
+
+/// Versi murni dari getSnackRecommendations - nerima allFoods langsung.
+/// Ini logic yang mau ditest: kalori diprioritasin duluan, rasio makro
+/// cuma jadi tie-breaker pas last-resort (temuan dari debugging sebelumnya).
+List<FoodItem> filterSnackRecommendations(
+  List<FoodItem> allFoods,
+  int targetCalories, {
+  MacroNutrient? macroPrefs,
+  int? dailyTargetCal,
+  double? dailyTargetCarbs,
+  double? dailyTargetProtein,
+  double? dailyTargetFat,
+  Map<String, double>? macrosEaten,
+  List<String>? excludeAllergens,
+}) {
+  final candidates = allFoods
+      .where((f) => !f.matchesAllergens(excludeAllergens))
+      .where(isHighQualitySnack)
+      .toList();
+
+  if (candidates.isEmpty) {
+    return filterHighQualitySnacks(allFoods, targetCalories,
+        excludeAllergens: excludeAllergens);
+  }
+
+  final double targetProtein = macroPrefs?.proteinPercent ?? 35.0;
+  final double targetCarbs = macroPrefs?.carbPercent ?? 45.0;
+  final double targetFat = macroPrefs?.fatPercent ?? 20.0;
+
+  final double remainingCarbs = dailyTargetCarbs != null && macrosEaten != null
+      ? (dailyTargetCarbs - (macrosEaten['carbs'] ?? 0))
+          .clamp(0, double.infinity)
+      : double.infinity;
+  final double remainingProtein =
+      dailyTargetProtein != null && macrosEaten != null
+          ? (dailyTargetProtein - (macrosEaten['protein'] ?? 0))
+              .clamp(0, double.infinity)
+          : double.infinity;
+  final double remainingFat = dailyTargetFat != null && macrosEaten != null
+      ? (dailyTargetFat - (macrosEaten['fat'] ?? 0)).clamp(0, double.infinity)
+      : double.infinity;
+
+  final nonOvershooting = candidates.where((f) {
+    return f.protein <= remainingProtein &&
+        f.carbs <= remainingCarbs &&
+        f.fat <= remainingFat;
+  }).toList();
+
+  final baseCandidates =
+      nonOvershooting.isNotEmpty ? nonOvershooting : candidates;
+  const double tolerancePercent = 0.15;
+
+  List<FoodItem> filtered =
+      baseCandidates.where((f) => f.calories == targetCalories).toList();
+
+  if (filtered.isEmpty) {
+    final tolerance = (targetCalories * tolerancePercent).ceil();
+    filtered = baseCandidates.where((f) {
+      final diff = (f.calories - targetCalories).abs();
+      return diff <= tolerance && f.calories <= targetCalories;
+    }).toList();
+  }
+
+  if (filtered.isEmpty) {
+    final tolerance = (targetCalories * tolerancePercent).ceil();
+    filtered = candidates.where((f) {
+      final diff = (f.calories - targetCalories).abs();
+      return diff <= tolerance && f.calories <= targetCalories;
+    }).toList();
+  }
+
+  if (filtered.isEmpty) {
+    final tolerance = (targetCalories * tolerancePercent).ceil();
+    filtered = baseCandidates.where((f) {
+      final diff = (f.calories - targetCalories).abs();
+      return diff <= tolerance;
+    }).toList();
+  }
+
+  if (filtered.isEmpty) {
+    final tolerance = (targetCalories * tolerancePercent).ceil();
+    filtered = candidates.where((f) {
+      final diff = (f.calories - targetCalories).abs();
+      return diff <= tolerance;
+    }).toList();
+  }
+
+  if (filtered.isEmpty) {
+    final fallback = [
+      ...baseCandidates.isNotEmpty ? baseCandidates : candidates
+    ];
+    fallback.sort((a, b) {
+      final diffA = (a.calories - targetCalories).abs();
+      final diffB = (b.calories - targetCalories).abs();
+      if (diffA != diffB) {
+        return diffA.compareTo(diffB);
+      }
+
+      final aProtein = calculateProteinPercent(a);
+      final aCarbs = a.carbs.toDouble() * 4 / a.calories * 100;
+      final aFat = calculateFatPercent(a);
+
+      final bProtein = calculateProteinPercent(b);
+      final bCarbs = b.carbs.toDouble() * 4 / b.calories * 100;
+      final bFat = calculateFatPercent(b);
+
+      final aError = (aProtein - targetProtein) * (aProtein - targetProtein) +
+          (aCarbs - targetCarbs) * (aCarbs - targetCarbs) +
+          (aFat - targetFat) * (aFat - targetFat);
+
+      final bError = (bProtein - targetProtein) * (bProtein - targetProtein) +
+          (bCarbs - targetCarbs) * (bCarbs - targetCarbs) +
+          (bFat - targetFat) * (bFat - targetFat);
+
+      return aError.compareTo(bError);
+    });
+    return fallback;
+  }
+
+  filtered.sort((a, b) {
+    final diffA = (a.calories - targetCalories).abs();
+    final diffB = (b.calories - targetCalories).abs();
+
+    if (diffA != diffB) {
+      return diffA.compareTo(diffB);
+    }
+
+    final aProtein = calculateProteinPercent(a);
+    final aCarbs = a.carbs.toDouble() * 4 / a.calories * 100;
+    final aFat = calculateFatPercent(a);
+
+    final bProtein = calculateProteinPercent(b);
+    final bCarbs = b.carbs.toDouble() * 4 / b.calories * 100;
+    final bFat = calculateFatPercent(b);
+
+    if (remainingCarbs != double.infinity &&
+        remainingProtein != double.infinity &&
+        remainingFat != double.infinity) {
+      final aRemainError =
+          ((a.carbs - remainingCarbs) * (a.carbs - remainingCarbs)) +
+              ((a.protein - remainingProtein) *
+                  (a.protein - remainingProtein)) +
+              ((a.fat - remainingFat) * (a.fat - remainingFat));
+
+      final bRemainError =
+          ((b.carbs - remainingCarbs) * (b.carbs - remainingCarbs)) +
+              ((b.protein - remainingProtein) *
+                  (b.protein - remainingProtein)) +
+              ((b.fat - remainingFat) * (b.fat - remainingFat));
+
+      return aRemainError.compareTo(bRemainError);
+    } else {
+      final aError = (aProtein - targetProtein) * (aProtein - targetProtein) +
+          (aCarbs - targetCarbs) * (aCarbs - targetCarbs) +
+          (aFat - targetFat) * (aFat - targetFat);
+
+      final bError = (bProtein - targetProtein) * (bProtein - targetProtein) +
+          (bCarbs - targetCarbs) * (bCarbs - targetCarbs) +
+          (bFat - targetFat) * (bFat - targetFat);
+
+      return aError.compareTo(bError);
+    }
+  });
+
+  return filtered;
+}
+
 // Layanan utama untuk akses Firestore.
 class FirestoreService {
 // Tambahkan ini
@@ -737,80 +1012,9 @@ class FirestoreService {
   // Based on research (Bermingham et al., 2024; Almoraie et al., 2021)
   // High-quality snacks = whole foods with high nutrient density
   // Snack recommendations = emphasis on protein quality for satiety & appetite control
-
-  /// Classify snack quality based on criteria from literature
-  ///
-  /// High-quality snack criteria:
-  /// 1. Whole foods (non-processed): buah, sayur, kacang, biji-bijian
-  /// 2. NOT: ultra-processed, cookies, candy, sugary drinks
-
-  /// Rule-based classification untuk snack sehat.
-  ///
-  /// Memilih snack berdasarkan kategori dan pengecualian nama.
-  // Cek apakah makanan termasuk snack berkualitas.
-  bool _isHighQualitySnack(FoodItem food) {
-    // High-quality snack categories based on research
-    final highQualityCategories = [
-      'buah',
-      'sayur',
-      'kacang',
-      'biji-bijian',
-      'dairy',
-      'yogurt',
-      'keju',
-      'nuts',
-      'seeds',
-    ];
-
-    // Lowercase untuk case-insensitive matching
-    final category = food.kategori.toLowerCase();
-    final name = food.name.toLowerCase();
-
-    // Check if kategori matches high-quality
-    final isCategoryMatched = highQualityCategories.any(
-      (hq) => category.contains(hq),
-    );
-
-    // Avoid explicitly known low-quality snacks
-    final isLowQuality = name.contains('kue') ||
-        name.contains('cookies') ||
-        name.contains('permen') ||
-        name.contains('candy') ||
-        name.contains('cokelat') ||
-        name.contains('chocolate') ||
-        name.contains('soda') ||
-        name.contains('minuman manis') ||
-        category.contains('kue') ||
-        category.contains('candy');
-
-    return isCategoryMatched && !isLowQuality;
-  }
-
-  /// Calculate protein percentage from macros
-  // Hitung persentase kalori dari protein.
-  double _calculateProteinPercent(FoodItem food) {
-    if (food.calories == 0) return 0;
-    // `food.protein` is stored as num, Firestore may return int on Android
-    // so convert safely to double instead of casting.
-    final proteinCal = food.protein.toDouble() * 4; // 4 cal/gram
-    return (proteinCal / food.calories) * 100;
-  }
-
-  /// persentase karbo dari total kalori
-  // Hitung persentase kalori dari karbohidrat.
-  double _calculateCarbPercent(FoodItem food) {
-    if (food.calories == 0) return 0;
-    final carbCal = food.carbs.toDouble() * 4; // 4 cal/gram
-    return (carbCal / food.calories) * 100;
-  }
-
-  /// persentase lemak dari total kalori
-  // Hitung persentase kalori dari lemak.
-  double _calculateFatPercent(FoodItem food) {
-    if (food.calories == 0) return 0;
-    final fatCal = food.fat.toDouble() * 9; // 9 cal/gram
-    return (fatCal / food.calories) * 100;
-  }
+  // (Klasifikasi & kalkulasi persen macro sekarang di top-level:
+  // isHighQualitySnack / calculateProteinPercent / calculateCarbPercent /
+  // calculateFatPercent, di atas class ini.)
 
   /// Get high-quality snacks filtered by target calories
   ///
@@ -823,55 +1027,8 @@ class FirestoreService {
       {List<String>? excludeAllergens}) async {
     try {
       final allFoods = await getAllFoodItems();
-
-      // Filter for high-quality snacks
-      final snacks = allFoods
-          .where((f) => !f.matchesAllergens(excludeAllergens))
-          .where(_isHighQualitySnack)
-          .toList();
-
-      // Filter by calorie range: exact match first, then ±15% fallback.
-      final exactMatch =
-          snacks.where((f) => f.calories == targetCalories).toList();
-      if (exactMatch.isNotEmpty) {
-        exactMatch.sort((a, b) {
-          final diffA = (a.calories - targetCalories).abs();
-          final diffB = (b.calories - targetCalories).abs();
-          return diffA.compareTo(diffB);
-        });
-        return exactMatch;
-      }
-
-      final tolerance = (targetCalories * 0.15).ceil();
-      final filtered = snacks.where((f) {
-        final diff = (f.calories - targetCalories).abs();
-        return diff <= tolerance && f.calories <= targetCalories;
-      }).toList();
-
-      if (filtered.isNotEmpty) {
-        // Sort by calorie proximity (ascending diff)
-        filtered.sort((a, b) {
-          final diffA = (a.calories - targetCalories).abs();
-          final diffB = (b.calories - targetCalories).abs();
-          return diffA.compareTo(diffB);
-        });
-
-        return filtered;
-      }
-
-      final overshootFallback = snacks.where((f) {
-        final diff = (f.calories - targetCalories).abs();
-        return diff <= tolerance;
-      }).toList();
-
-      // Sort by calorie proximity (ascending diff)
-      overshootFallback.sort((a, b) {
-        final diffA = (a.calories - targetCalories).abs();
-        final diffB = (b.calories - targetCalories).abs();
-        return diffA.compareTo(diffB);
-      });
-
-      return overshootFallback;
+      return filterHighQualitySnacks(allFoods, targetCalories,
+          excludeAllergens: excludeAllergens);
     } catch (e) {
       debugPrint('Error getting high-quality snacks: $e');
       return [];
@@ -893,189 +1050,17 @@ class FirestoreService {
       List<String>? excludeAllergens}) async {
     try {
       final allFoods = await getAllFoodItems();
-
-      // Filter for high-quality snacks
-      final candidates = allFoods
-          .where((f) => !f.matchesAllergens(excludeAllergens))
-          .where(_isHighQualitySnack)
-          .toList();
-
-      if (candidates.isEmpty) {
-        return await getHighQualitySnacks(
-          targetCalories,
-          excludeAllergens: excludeAllergens,
-        );
-      }
-
-      // Determine macro thresholds based on user preference or default
-      final double targetProtein =
-          macroPrefs?.proteinPercent ?? 35.0; // default: 35%
-      final double targetCarbs =
-          macroPrefs?.carbPercent ?? 45.0; // default: 45%
-      final double targetFat = macroPrefs?.fatPercent ?? 20.0; // default: 20%
-
-      // Calculate remaining macro budget (to prevent overshoot)
-      final double remainingCarbs =
-          dailyTargetCarbs != null && macrosEaten != null
-              ? (dailyTargetCarbs - (macrosEaten['carbs'] ?? 0))
-                  .clamp(0, double.infinity)
-              : double.infinity;
-      final double remainingProtein =
-          dailyTargetProtein != null && macrosEaten != null
-              ? (dailyTargetProtein - (macrosEaten['protein'] ?? 0))
-                  .clamp(0, double.infinity)
-              : double.infinity;
-      final double remainingFat = dailyTargetFat != null && macrosEaten != null
-          ? (dailyTargetFat - (macrosEaten['fat'] ?? 0))
-              .clamp(0, double.infinity)
-          : double.infinity;
-
-      // Step 1: Filter snacks that won't cause daily overshoot
-      // (Do not enforce a hard "high-protein" threshold here; selection
-      // prioritizes calorie match and macro budget.)
-      final nonOvershooting = candidates.where((f) {
-        return f.protein <= remainingProtein &&
-            f.carbs <= remainingCarbs &&
-            f.fat <= remainingFat;
-      }).toList();
-
-      // Fallback if overshoot filtering too strict
-      final baseCandidates =
-          nonOvershooting.isNotEmpty ? nonOvershooting : candidates;
-      const double tolerancePercent = 0.15;
-
-      // Primary: exact calorie match only.
-      List<FoodItem> filtered =
-          baseCandidates.where((f) => f.calories == targetCalories).toList();
-
-      // If nothing fits exactly, relax to ±15% but prefer non-overshooting.
-      if (filtered.isEmpty) {
-        final tolerance = (targetCalories * tolerancePercent).ceil();
-        filtered = baseCandidates.where((f) {
-          final diff = (f.calories - targetCalories).abs();
-          return diff <= tolerance && f.calories <= targetCalories;
-        }).toList();
-      }
-
-      // If still empty, do the same non-overshooting fallback on all candidates.
-      if (filtered.isEmpty) {
-        final tolerance = (targetCalories * tolerancePercent).ceil();
-        filtered = candidates.where((f) {
-          final diff = (f.calories - targetCalories).abs();
-          return diff <= tolerance && f.calories <= targetCalories;
-        }).toList();
-      }
-
-      // Final fallback: allow overshoot within tolerance only if no
-      // non-overshooting snack exists.
-      if (filtered.isEmpty) {
-        final tolerance = (targetCalories * tolerancePercent).ceil();
-        filtered = baseCandidates.where((f) {
-          final diff = (f.calories - targetCalories).abs();
-          return diff <= tolerance;
-        }).toList();
-      }
-
-      if (filtered.isEmpty) {
-        final tolerance = (targetCalories * tolerancePercent).ceil();
-        filtered = candidates.where((f) {
-          final diff = (f.calories - targetCalories).abs();
-          return diff <= tolerance;
-        }).toList();
-      }
-
-      // Last resort: if still empty, return the closest high-quality snacks.
-      if (filtered.isEmpty) {
-        final fallback = [
-          ...baseCandidates.isNotEmpty ? baseCandidates : candidates
-        ];
-        fallback.sort((a, b) {
-          final diffA = (a.calories - targetCalories).abs();
-          final diffB = (b.calories - targetCalories).abs();
-          if (diffA != diffB) {
-            return diffA.compareTo(diffB);
-          }
-
-          final aProtein = _calculateProteinPercent(a);
-          final aCarbs = a.carbs.toDouble() * 4 / a.calories * 100;
-          final aFat = _calculateFatPercent(a);
-
-          final bProtein = _calculateProteinPercent(b);
-          final bCarbs = b.carbs.toDouble() * 4 / b.calories * 100;
-          final bFat = _calculateFatPercent(b);
-
-          final aError =
-              (aProtein - targetProtein) * (aProtein - targetProtein) +
-                  (aCarbs - targetCarbs) * (aCarbs - targetCarbs) +
-                  (aFat - targetFat) * (aFat - targetFat);
-
-          final bError =
-              (bProtein - targetProtein) * (bProtein - targetProtein) +
-                  (bCarbs - targetCarbs) * (bCarbs - targetCarbs) +
-                  (bFat - targetFat) * (bFat - targetFat);
-
-          return aError.compareTo(bError);
-        });
-        return fallback;
-      }
-
-      // Sort by macro match quality
-      filtered.sort((a, b) {
-        // =========================
-        // PRIORITAS 1: KALORI TERDEKAT
-        // =========================
-        final diffA = (a.calories - targetCalories).abs();
-        final diffB = (b.calories - targetCalories).abs();
-
-        if (diffA != diffB) {
-          return diffA.compareTo(diffB);
-        }
-
-        // =========================
-        // PRIORITAS 2: MACRO MATCH
-        // =========================
-        final aProtein = _calculateProteinPercent(a);
-        final aCarbs = a.carbs.toDouble() * 4 / a.calories * 100;
-        final aFat = _calculateFatPercent(a);
-
-        final bProtein = _calculateProteinPercent(b);
-        final bCarbs = b.carbs.toDouble() * 4 / b.calories * 100;
-        final bFat = _calculateFatPercent(b);
-
-        // kalau ada remaining macro (biar ga overshoot)
-        if (remainingCarbs != double.infinity &&
-            remainingProtein != double.infinity &&
-            remainingFat != double.infinity) {
-          final aRemainError =
-              ((a.carbs - remainingCarbs) * (a.carbs - remainingCarbs)) +
-                  ((a.protein - remainingProtein) *
-                      (a.protein - remainingProtein)) +
-                  ((a.fat - remainingFat) * (a.fat - remainingFat));
-
-          final bRemainError =
-              ((b.carbs - remainingCarbs) * (b.carbs - remainingCarbs)) +
-                  ((b.protein - remainingProtein) *
-                      (b.protein - remainingProtein)) +
-                  ((b.fat - remainingFat) * (b.fat - remainingFat));
-
-          return aRemainError.compareTo(bRemainError);
-        } else {
-          // fallback ke target macro
-          final aError =
-              (aProtein - targetProtein) * (aProtein - targetProtein) +
-                  (aCarbs - targetCarbs) * (aCarbs - targetCarbs) +
-                  (aFat - targetFat) * (aFat - targetFat);
-
-          final bError =
-              (bProtein - targetProtein) * (bProtein - targetProtein) +
-                  (bCarbs - targetCarbs) * (bCarbs - targetCarbs) +
-                  (bFat - targetFat) * (bFat - targetFat);
-
-          return aError.compareTo(bError);
-        }
-      });
-
-      return filtered;
+      return filterSnackRecommendations(
+        allFoods,
+        targetCalories,
+        macroPrefs: macroPrefs,
+        dailyTargetCal: dailyTargetCal,
+        dailyTargetCarbs: dailyTargetCarbs,
+        dailyTargetProtein: dailyTargetProtein,
+        dailyTargetFat: dailyTargetFat,
+        macrosEaten: macrosEaten,
+        excludeAllergens: excludeAllergens,
+      );
     } catch (e) {
       debugPrint('Error getting snack recommendations: $e');
       return [];
