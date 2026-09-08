@@ -72,5 +72,49 @@ void main() {
       expect(item.matchesAllergens([]), isFalse);
       expect(item.matchesAllergens(null), isFalse);
     });
+
+    test('FoodItem.matchesAllergens field alergen eksplisit dicek duluan',
+        () {
+      final item = FoodItem(
+        id: '5',
+        name: 'Sup Krim Ayam',
+        kategori: 'Daging',
+        kondisi: 'Matang',
+        calories: 180,
+        protein: 15,
+        carbs: 5,
+        fat: 8,
+        alergen: const ['susu'],
+      );
+
+      expect(item.matchesAllergens(['susu']), isTrue,
+          reason: 'Field alergen eksplisit cocok, harus match');
+    });
+
+    test(
+        'FoodItem.matchesAllergens: kalau field alergen udah keisi, nama/kategori '
+        'nggak dicek lagi - bisa "meleset" kalau field-nya nggak lengkap', () {
+      // Nama-nya jelas nyebut "udang", tapi field alergen cuma nyebut susu.
+      // Behavior sekarang: field eksplisit menang total begitu ada isinya,
+      // fallback nama/kategori nggak pernah dijalanin lagi buat item ini.
+      final item = FoodItem(
+        id: '6',
+        name: 'Udang Saus Mentega',
+        kategori: 'Ikan, Kerang, Udang',
+        kondisi: 'Matang',
+        calories: 220,
+        protein: 18,
+        carbs: 4,
+        fat: 14,
+        alergen: const ['susu'], // field ada isi, tapi 'udang' nggak disebut
+      );
+
+      expect(item.matchesAllergens(['udang']), isFalse,
+          reason: 'Field alergen eksplisit nggak nyebut udang, jadi nggak '
+              'match - meski namanya jelas mengandung udang. Ini konfirmasi '
+              'perilaku "field eksplisit menang total", bukan bug.');
+      expect(item.matchesAllergens(['susu']), isTrue,
+          reason: 'Tapi buat susu (yang emang ada di field), tetep match');
+    });
   });
 }
