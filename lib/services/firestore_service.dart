@@ -637,7 +637,11 @@ class FirestoreService {
   factory FirestoreService() => _instance;
   FirestoreService._internal();
 
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  // late final: baru jalan pas PERTAMA KALI kepake, bukan pas class-nya
+  // di-construct. Ini penting buat testing - kalau fake subclass nge-override
+  // SEMUA method yang pake _db, baris ini nggak akan pernah kepanggil, jadi
+  // FakeFirestoreService() aman di-construct di test tanpa Firebase ke-init.
+  late final FirebaseFirestore _db = FirebaseFirestore.instance;
   final Random _random = Random(); // Untuk randomisasi
 
   // helper serialisation for isolate

@@ -6,8 +6,11 @@ import 'food_image.dart';
 class MealItemCard extends StatefulWidget {
   final FoodItem foodItem; // Data makanan awal
   final String category; // Kategori untuk filter swap (misal: "Serealia")
-  /// optional service override (useful for testing)
-  final FirestoreService? firestoreService;
+  /// Override buat testing. FirestoreService pakai pola singleton (factory
+  /// constructor), jadi nggak bisa di-subclass buat bikin fake - makanya
+  /// yang di-override di sini fungsinya langsung, bukan instance-nya.
+  final Future<List<FoodItem>> Function(String category,
+      {List<String>? excludeAllergens})? getFoodCandidatesOverride;
   final bool selectable; // apakah card bisa dipilih sebagai opsi utama
   final bool isSelected; // tampilkan highlight jika terpilih
   final void Function(FoodItem)? onSelect; // callback ketika dipilih
@@ -22,7 +25,7 @@ class MealItemCard extends StatefulWidget {
     Key? key,
     required this.foodItem,
     required this.category,
-    this.firestoreService,
+    this.getFoodCandidatesOverride,
     this.selectable = false,
     this.isSelected = false,
     this.onSelect,
@@ -39,14 +42,16 @@ class _MealItemCardState extends State<MealItemCard> {
   late double currentWeight; // Berat porsi (gram)
   bool isSwapping = false; // Loading indicator
 
-  late final FirestoreService _firestoreService;
+  late final Future<List<FoodItem>> Function(String category,
+      {List<String>? excludeAllergens}) _getFoodCandidates;
 
   @override
   void initState() {
     super.initState();
     currentFood = widget.foodItem;
-    // allow override for testing
-    _firestoreService = widget.firestoreService ?? FirestoreService();
+    // allow override for testing - lihat komentar di getFoodCandidatesOverride
+    _getFoodCandidates =
+        widget.getFoodCandidatesOverride ?? FirestoreService().getFoodCandidates;
     // Default berat 100g (karena data DB per 100g), atau sesuaikan logika kamu
     currentWeight = 100.0;
     // kirim nilai awal ke parent setelah frame ter-render
@@ -65,7 +70,7 @@ class _MealItemCardState extends State<MealItemCard> {
     setState(() => isSwapping = true);
 
     // 1. Ambil Kandidat Pengganti (Aman Kuota karena pakai Cache)
-    List<FoodItem> candidates = await _firestoreService.getFoodCandidates(
+    List<FoodItem> candidates = await _getFoodCandidates(
       widget.category,
       excludeAllergens: widget.excludedAllergens,
     );
@@ -81,10 +86,11 @@ class _MealItemCardState extends State<MealItemCard> {
       // Rumus: (KaloriLama / KaloriBaruPer100g) * BeratLama
       double targetCalories = (currentFood.calories * currentWeight / 100);
       double newWeightDouble = (targetCalories / newFood.calories) * 100;
+      double newWeight = newWeightDouble.isFinite ? newWeightDouble.clamp(10.0, 2000.0) : 100.0;
 
       setState(() {
         currentFood = newFood;
-        currentWeight = newWeightDouble; // Update berat baru
+        currentWeight = newWeight; // Update berat baru
         isSwapping = false;
       });
 
@@ -118,7 +124,9 @@ class _MealItemCardState extends State<MealItemCard> {
     // Ambil kandidat untuk dialog pencarian. Untuk manual swap kita
     // tidak membatasi kategori supaya user bebas memilih makanan lain.
     // (random swap tetap memakai kategori agar lebih cocok otomatis).
-    List<FoodItem> candidates = await _firestoreService.getAllFoodItems();
+    // Catatan: jalur ini belum di-override buat testing (belum ada test-nya
+    // sekarang) - masih manggil singleton asli langsung.
+    List<FoodItem> candidates = await FirestoreService().getAllFoodItems();
 
     // Filter alergi sebelum menampilkan search
     if (widget.excludedAllergens != null &&
