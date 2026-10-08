@@ -33,7 +33,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
   MacroNutrient? _selectedMacro; // user-chosen macro prefs saat sesi ini
   MacroNutrient? _loadedMacro; // preferensi yang dimuat dari lokal / Firestore
 
-  String _allergies = '';
   List<String> _excludeAllergies = [];
 
   // simple meal & snack progress trackers
@@ -43,8 +42,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
   bool _afternoonSnackDone = false;
   bool _dinnerDone = false;
 
-  // Key untuk mengrefresh Menu
-  int _refreshKey = 0; // pemicu ulang snack section saat refresh
   final Map<String, Future<List<FoodItem>>> _snackFutures =
       {}; // cache rekomendasi snack
 
@@ -64,10 +61,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
   // Cache for meal plan futures so rebuilds don't re-trigger generation
   final Map<String, Future<List<FoodItem>>> _mealFutures =
       {}; // cache menu utama per section
-
-  // Cache menu harian dari Firestore
-  Map<String, dynamic>? _dailyMenuCache;
-  bool _loadingDailyMenu = true;
 
   // ===== NEW: Tracking untuk semua loaded meals (sumber kebenaran untuk totals) =====
   // Kunci: section name, Value: list FoodItems yang sedang aktif di section tersebut
@@ -142,7 +135,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
     final data = await _storageService.loadDataUser();
     final raw = data['alergi'] ?? '';
     setState(() {
-      _allergies = raw;
       _excludeAllergies = _normalizeAllergens(raw);
     });
   }
@@ -172,7 +164,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
         _bmr = _calculator.calculateBmr();
         _tdee = _calculator.calculateTdee();
         // Clear cached menus so they regenerate with new targets
-        _invalidateMenuCaches(alsoDailyMenuCache: true);
+        _invalidateMenuCaches();
       });
       _prepareAllSectionFutures();
     }
@@ -189,15 +181,10 @@ class _ResultsScreenState extends State<ResultsScreen> {
   /// Load menu harian dari Firestore
   Future<void> _loadDailyMenuCache() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) {
-      setState(() => _loadingDailyMenu = false);
-      return;
-    }
+    if (uid == null) return;
     final data = await _firestoreService.loadDailyMenu(uid);
     if (mounted) {
       setState(() {
-        _loadingDailyMenu = false;
-
         // Validasi TDEE — kalau berbeda dari yang tersimpan, abaikan menu lama
         if (data != null) {
           final savedTdee = (data['tdee'] as num?)?.toInt();
@@ -206,12 +193,9 @@ class _ResultsScreenState extends State<ResultsScreen> {
             // TDEE berbeda → data tidak valid, generate ulang
             debugPrint(
                 '⚠️ TDEE berubah ($savedTdee → $currentTdee), menu lama diabaikan');
-            _dailyMenuCache = null;
             return;
           }
         }
-
-        _dailyMenuCache = data;
 
         // Auto-load goal dari daily menu kalau ada
         if (data != null && _selectedGoal == null) {
@@ -270,7 +254,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
           if (invalidCache) {
             debugPrint(
                 '⚠️ Cached daily menu berisi makanan yang harus dihindari, menu lama diabaikan');
-            _invalidateMenuCaches(alsoDailyMenuCache: true);
+            _invalidateMenuCaches();
             return;
           }
         }
@@ -418,14 +402,11 @@ class _ResultsScreenState extends State<ResultsScreen> {
 
   // Clear semua cache sekaligus - dulu di-clear manual di beberapa tempat
   // dan suka ada yang kelewat (itu penyebab bug macro/snack kemarin).
-  void _invalidateMenuCaches({bool alsoDailyMenuCache = false}) {
+  void _invalidateMenuCaches() {
     _mealFutures.clear();
     _snackFutures.clear();
     _allLoadedMeals.clear();
     _currentMealsData.clear();
-    if (alsoDailyMenuCache) {
-      _dailyMenuCache = null;
-    }
   }
 
   // Tetapkan tujuan diet dan regenerasi menu yang relevan.
@@ -439,8 +420,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
       _selectedGoal = goal;
       _finalCalories = _calculator.getAdjustedCalories(goal, _tdee);
       // keep selected/loaded macro so the summary remains visible
-      // bump refresh key to force UI refresh where needed
-      _refreshKey++;
     });
 
     // pre-load menu futures so totals update even when sections remain collapsed
@@ -851,7 +830,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
                   }
                   return items;
                 });
-                _refreshKey++;
               });
             },
           ),
@@ -1087,7 +1065,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
                   }
                   return items;
                 });
-                _refreshKey++;
               });
             },
           ),
@@ -1204,100 +1181,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
           },
         ),
       ],
-    );
-  }
-
-  // Tampilkan baris item makanan yang bisa diketuk.
-  Widget _buildFoodItemRow(FoodItem item) {
-    bool isMentah = item.kondisi.toLowerCase() == 'mentah';
-
-    // Bungkus dengan InkWell agar bisa diklik
-    return InkWell(
-      onTap: () => _showFoodDetail(context, item),
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.green.shade200, width: 1),
-          borderRadius: BorderRadius.circular(8),
-          color: Colors.white,
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Gambar Thumbnail
-            Container(
-              width: 60,
-              height: 60,
-              margin: const EdgeInsets.only(right: 12),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                color: Colors.grey[200],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: item.imageUrl != null
-                    ? buildFoodImage(item.imageUrl!)
-                    : const Icon(Icons.fastfood, color: Colors.grey),
-              ),
-            ),
-
-            // Info Makanan
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(item.name,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 16),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis),
-
-                  // Badge Status
-                  Container(
-                    margin: const EdgeInsets.symmetric(vertical: 8),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: isMentah
-                          ? Colors.orange.withOpacity(0.15)
-                          : Colors.blue.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      isMentah ? "Bahan Mentah" : "Siap Makan",
-                      style: TextStyle(
-                          fontSize: 10,
-                          color:
-                              isMentah ? Colors.deepOrange : Colors.blue[800],
-                          fontWeight: FontWeight.bold),
-                    ),
-                  ),
-
-                  Text(
-                      'P: ${item.protein}g | K: ${item.carbs}g | L: ${item.fat}g',
-                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                ],
-              ),
-            ),
-
-            // Kalori
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text('${item.calories}',
-                    style: const TextStyle(
-                        color: Colors.green,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16)),
-                const Text('kkal',
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
-              ],
-            ),
-          ],
-        ),
-      ),
     );
   }
 
