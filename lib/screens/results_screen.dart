@@ -264,6 +264,17 @@ class _ResultsScreenState extends State<ResultsScreen> {
     }
   }
 
+  // Rasio makro untuk generate menu utama (null = pakai kalori saja).
+  Map<String, double>? _macroRatios() {
+    final macro = _selectedMacro ?? _loadedMacro;
+    if (macro == null) return null;
+    return {
+      'protein': macro.proteinPercent / 100,
+      'carbs': macro.carbPercent / 100,
+      'fat': macro.fatPercent / 100,
+    };
+  }
+
   // Siapkan future menu utama dan snack untuk setiap section.
   void _prepareAllSectionFutures() {
     final int baseCalories = _finalCalories ?? _tdee;
@@ -277,13 +288,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
       'Camilan Sore (16.00)': (baseCalories * 0.10).round(),
     };
 
-    final ratios = _selectedMacro != null
-        ? {
-            'protein': _selectedMacro!.proteinPercent / 100,
-            'carbs': _selectedMacro!.carbPercent / 100,
-            'fat': _selectedMacro!.fatPercent / 100,
-          }
-        : null;
+    final ratios = _macroRatios();
 
     for (final entry in mealTargets.entries) {
       final title = entry.key;
@@ -810,13 +815,8 @@ class _ResultsScreenState extends State<ResultsScreen> {
                 _mealFutures[title] = _firestoreService
                     .generateMealPlan(
                   targetCalories,
-                  ratios: _selectedMacro != null
-                      ? {
-                          'protein': _selectedMacro!.proteinPercent / 100,
-                          'carbs': _selectedMacro!.carbPercent / 100,
-                          'fat': _selectedMacro!.fatPercent / 100,
-                        }
-                      : null,
+                  ratios: _macroRatios(),
+                  excludeAllergens: _excludeAllergies,
                 )
                     .then((items) {
                   if (uid != null && _selectedGoal != null) {
@@ -844,13 +844,8 @@ class _ResultsScreenState extends State<ResultsScreen> {
           future: _mealFutures[title] ??= _firestoreService
               .generateMealPlan(
             targetCalories,
-            ratios: _selectedMacro != null
-                ? {
-                    'protein': _selectedMacro!.proteinPercent / 100,
-                    'carbs': _selectedMacro!.carbPercent / 100,
-                    'fat': _selectedMacro!.fatPercent / 100,
-                  }
-                : null,
+            ratios: _macroRatios(),
+            excludeAllergens: _excludeAllergies,
           )
               .then((items) {
             final uid = FirebaseAuth.instance.currentUser?.uid;
