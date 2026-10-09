@@ -3,15 +3,16 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/calculator_service.dart';
 import '../services/firestore_service.dart';
-import '../services/macro_nutrient.dart'; // add import
+import '../services/macro_nutrient.dart';
 import '../services/local_storage_service.dart';
-import '../screens/macro_customization.dart'; // add import
-import '../screens/food_search.dart'; // add import
+import '../screens/macro_customization.dart';
+import '../screens/food_search.dart';
 import '../auth/auth_service.dart';
-import '../widgets/meal_item_card.dart'; // add import
+import '../widgets/meal_item_card.dart';
 import '../widgets/food_image.dart';
 import 'package:provider/provider.dart';
 import '../models/profile_notifier.dart';
+import '../view_models/results_view_model.dart';
 
 class ResultsScreen extends StatefulWidget {
   final CalculatorService calculator;
@@ -23,50 +24,12 @@ class ResultsScreen extends StatefulWidget {
 }
 
 class _ResultsScreenState extends State<ResultsScreen> {
-  late double _bmi;
-  late String _bmiCategory;
-  late double _bmr; // store BMR for display
-  late int _tdee;
-
-  DietGoal? _selectedGoal;
-  int? _finalCalories;
-  MacroNutrient? _selectedMacro; // user-chosen macro prefs saat sesi ini
-  MacroNutrient? _loadedMacro; // preferensi yang dimuat dari lokal / Firestore
-
-  List<String> _excludeAllergies = [];
-
-  // simple meal & snack progress trackers
   bool _breakfastDone = false;
   bool _morningSnackDone = false;
   bool _lunchDone = false;
   bool _afternoonSnackDone = false;
   bool _dinnerDone = false;
 
-  final Map<String, Future<List<FoodItem>>> _snackFutures =
-      {}; // cache rekomendasi snack
-
-  // Last measurement cache
-  Map<String, dynamic>? _lastMeasurement;
-  bool _loadingLastMeasurement = true;
-
-  // notifier for daily nutrient totals so UI can listen live
-  final ValueNotifier<Map<String, double>> _totalsNotifier =
-      ValueNotifier(<String, double>{});
-
-  // ===== NEW: state untuk menyimpan nutrisi aktual setiap card =====
-  // kunci dibentuk dari kombinasi section-title & index agar unik
-  final Map<String, Map<String, double>> _currentMealsData =
-      {}; // track nilai gizi aktual per card
-
-  // Cache for meal plan futures so rebuilds don't re-trigger generation
-  final Map<String, Future<List<FoodItem>>> _mealFutures =
-      {}; // cache menu utama per section
-
-  // ===== NEW: Tracking untuk semua loaded meals (sumber kebenaran untuk totals) =====
-  // Kunci: section name, Value: list FoodItems yang sedang aktif di section tersebut
-  final Map<String, List<FoodItem>> _allLoadedMeals = {};
-
-  // Tracking expanded state untuk setiap meal section (untuk collapse/expand)
   final Map<String, bool> _expandedSections = {
     'Sarapan (06.00 - 09.00 Pagi)': false,
     'Camilan Pagi (10.00 Pagi)': false,
@@ -75,404 +38,41 @@ class _ResultsScreenState extends State<ResultsScreen> {
     'Makan Malam  (selesai sebelum 19.00)': false,
   };
 
-  final FirestoreService _firestoreService = FirestoreService();
-  final AuthService _authService = AuthService(); // add this
-  final LocalStorageService _storageService = LocalStorageService();
-  late CalculatorService _calculator;
-  ProfileNotifier? _profileNotifier;
+  late final ResultsViewModel _vm;
 
-  // Inisialisasi data awal saat layar pertama kali dibuka.
   @override
   void initState() {
     super.initState();
-    // initialize calculator from the provided one; may be replaced by notifier
-    _calculator = widget.calculator;
-    // hitung nilai awal dan muat data tersimpan
-    _bmi = _calculator.calculateBmi();
-    _bmiCategory = _calculator.getBmiCategory(_bmi);
-    _bmr = _calculator.calculateBmr();
-    _tdee = _calculator.calculateTdee();
-    _loadLastMeasurement();
-    _loadMacroPreferences();
-    _bootstrap();
-    // initial totals
-    _updateTotals();
+    _vm = ResultsViewModel(
+      calculator: widget.calculator,
+      firestoreService: FirestoreService(),
+      storageService: LocalStorageService(),
+      authService: AuthService(),
+      getUid: () => FirebaseAuth.instance.currentUser?.uid,
+    );
+    _vm.init();
   }
 
   @override
-  // Sinkronkan notifier profil jika ada perubahan data pengguna.
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final pn = Provider.of<ProfileNotifier?>(context);
-    if (pn != null && pn != _profileNotifier) {
-      _profileNotifier?.removeListener(_onProfileChanged);
-      _profileNotifier = pn;
-      pn.addListener(_onProfileChanged);
-      // If notifier already has a calculator, apply it immediately
-      if (pn.calculator != null) {
-        _onProfileChanged();
-      }
-    }
-  }
-
-  // Jalankan proses awal untuk memuat data pendukung layar.
-  Future<void> _bootstrap() async {
-    await _loadAllergies();
-    await _loadDailyMenuCache();
-  }
-
-  // Ubah daftar alergi mentah menjadi daftar yang lebih rapi.
-  List<String> _normalizeAllergens(String raw) {
-    return raw
-        .split(',')
-        .map((e) => e.trim().toLowerCase())
-        .where((e) => e.isNotEmpty)
-        .toList();
-  }
-
-  // Ambil alergi pengguna dari penyimpanan lokal.
-  Future<void> _loadAllergies() async {
-    final data = await _storageService.loadDataUser();
-    final raw = data['alergi'] ?? '';
-    setState(() {
-      _excludeAllergies = _normalizeAllergens(raw);
-    });
-  }
-
-  // Cek apakah makanan harus dihindari karena alergi.
-  bool _isExcludedByAllergens(FoodItem item) {
-    return item.matchesAllergens(_excludeAllergies);
-  }
-
-  // Saring daftar makanan agar aman untuk alergi pengguna.
-  List<FoodItem> _filterAllergicItems(List<FoodItem> items) {
-    if (_excludeAllergies.isEmpty) return items;
-    return items
-        .where((item) => !item.matchesAllergens(_excludeAllergies))
-        .toList();
-  }
-
-  // Perbarui kalkulator saat profil pengguna berubah.
-  Future<void> _onProfileChanged() async {
-    final calc = _profileNotifier?.calculator;
-    if (calc != null) {
-      await _loadAllergies();
-      setState(() {
-        _calculator = calc;
-        _bmi = _calculator.calculateBmi();
-        _bmiCategory = _calculator.getBmiCategory(_bmi);
-        _bmr = _calculator.calculateBmr();
-        _tdee = _calculator.calculateTdee();
-        // Clear cached menus so they regenerate with new targets
-        _invalidateMenuCaches();
-      });
-      _prepareAllSectionFutures();
-    }
+    _vm.attachProfile(Provider.of<ProfileNotifier?>(context));
   }
 
   @override
-  // Lepaskan listener saat widget tidak dipakai lagi.
   void dispose() {
-    _profileNotifier?.removeListener(_onProfileChanged);
+    _vm.dispose();
     super.dispose();
   }
 
-  // Muat menu harian yang tersimpan dari Firestore.
-  /// Load menu harian dari Firestore
-  Future<void> _loadDailyMenuCache() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    final data = await _firestoreService.loadDailyMenu(uid);
-    if (mounted) {
-      setState(() {
-        // Validasi TDEE — kalau berbeda dari yang tersimpan, abaikan menu lama
-        if (data != null) {
-          final savedTdee = (data['tdee'] as num?)?.toInt();
-          final currentTdee = _tdee;
-          if (savedTdee != null && savedTdee != currentTdee) {
-            // TDEE berbeda → data tidak valid, generate ulang
-            debugPrint(
-                '⚠️ TDEE berubah ($savedTdee → $currentTdee), menu lama diabaikan');
-            return;
-          }
-        }
-
-        // Auto-load goal dari daily menu kalau ada
-        if (data != null && _selectedGoal == null) {
-          final goalStr = data['goal'] as String?;
-          DietGoal? autoGoal;
-          if (goalStr == 'lose')
-            autoGoal = DietGoal.lose;
-          else if (goalStr == 'gain')
-            autoGoal = DietGoal.gain;
-          else if (goalStr == 'maintain') autoGoal = DietGoal.maintain;
-          if (autoGoal != null) {
-            _selectedGoal = autoGoal;
-            _finalCalories = _calculator.getAdjustedCalories(autoGoal, _tdee);
-          }
-        }
-
-        // Pre-populate _mealFutures dari cache Firestore
-        if (data != null) {
-          bool invalidCache = false;
-
-          for (final section in [
-            'Sarapan (06.00 - 09.00 Pagi)',
-            'Makan Siang (12.00 - 15.00)',
-            'Makan Malam  (selesai sebelum 19.00)'
-          ]) {
-            if (data.containsKey(section)) {
-              final items = _firestoreService.parseFoodItems(data[section]);
-              if (items.any(_isExcludedByAllergens)) {
-                invalidCache = true;
-                break;
-              }
-              if (items.isNotEmpty) {
-                _mealFutures[section] = Future.value(items);
-                _allLoadedMeals[section] = items; // track untuk totals
-              }
-            }
-          }
-
-          for (final section in [
-            'Camilan Pagi (10.00 Pagi)',
-            'Camilan Sore (16.00)'
-          ]) {
-            if (data.containsKey(section)) {
-              final items = _firestoreService.parseFoodItems(data[section]);
-              if (items.any(_isExcludedByAllergens)) {
-                invalidCache = true;
-                break;
-              }
-              if (items.isNotEmpty) {
-                _snackFutures[section] = Future.value(items);
-                _allLoadedMeals[section] = items; // track untuk totals
-              }
-            }
-          }
-
-          if (invalidCache) {
-            debugPrint(
-                '⚠️ Cached daily menu berisi makanan yang harus dihindari, menu lama diabaikan');
-            _invalidateMenuCaches();
-            return;
-          }
-        }
-      });
-      _prepareAllSectionFutures();
-      _updateTotals();
-    }
-  }
-
-  // Rasio makro untuk generate menu utama (null = pakai kalori saja).
-  Map<String, double>? _macroRatios() {
-    final macro = _selectedMacro ?? _loadedMacro;
-    if (macro == null) return null;
-    return {
-      'protein': macro.proteinPercent / 100,
-      'carbs': macro.carbPercent / 100,
-      'fat': macro.fatPercent / 100,
-    };
-  }
-
-  // Siapkan future menu utama dan snack untuk setiap section.
-  void _prepareAllSectionFutures() {
-    final int baseCalories = _finalCalories ?? _tdee;
-    final Map<String, int> mealTargets = {
-      'Sarapan (06.00 - 09.00 Pagi)': (baseCalories * 0.20).round(),
-      'Makan Siang (12.00 - 15.00)': (baseCalories * 0.30).round(),
-      'Makan Malam  (selesai sebelum 19.00)': (baseCalories * 0.30).round(),
-    };
-    final Map<String, int> snackTargets = {
-      'Camilan Pagi (10.00 Pagi)': (baseCalories * 0.10).round(),
-      'Camilan Sore (16.00)': (baseCalories * 0.10).round(),
-    };
-
-    final ratios = _macroRatios();
-
-    for (final entry in mealTargets.entries) {
-      final title = entry.key;
-      final target = entry.value;
-      if (!_mealFutures.containsKey(title)) {
-        _mealFutures[title] = _firestoreService
-            .generateMealPlan(
-          target,
-          ratios: ratios,
-          excludeAllergens: _excludeAllergies,
-        )
-            .then((items) {
-          if (items.isNotEmpty) {
-            _allLoadedMeals[title] = items;
-            _updateTotals();
-          }
-          final uid = FirebaseAuth.instance.currentUser?.uid;
-          if (uid != null && _selectedGoal != null) {
-            _firestoreService.saveSectionMenu(
-              uid: uid,
-              section: title,
-              items: items,
-              goal: _selectedGoal!.toString().split('.').last,
-              tdee: _tdee,
-            );
-          }
-          return items;
-        });
-      }
-    }
-
-    for (final entry in snackTargets.entries) {
-      final title = entry.key;
-      final target = entry.value;
-      if (!_snackFutures.containsKey(title)) {
-        _snackFutures[title] = _buildSnackFuture(title, target).then((items) {
-          if (items.isNotEmpty) {
-            _allLoadedMeals[title] = items;
-            final key = 'snack-$title';
-            _currentMealsData[key] = {
-              'calories': items.first.calories.toDouble(),
-              'protein': items.first.protein.toDouble(),
-              'carbs': items.first.carbs.toDouble(),
-              'fat': items.first.fat.toDouble(),
-            };
-            _updateTotals();
-          }
-          final uid = FirebaseAuth.instance.currentUser?.uid;
-          if (uid != null && _selectedGoal != null && items.isNotEmpty) {
-            _firestoreService.saveSectionMenu(
-              uid: uid,
-              section: title,
-              items: [items.first],
-              goal: _selectedGoal!.toString().split('.').last,
-              tdee: _tdee,
-            );
-          }
-          return items;
-        });
-      }
-    }
-  }
-
-  // Muat preferensi makro dari lokal lalu fallback ke Firestore.
-  Future<void> _loadMacroPreferences() async {
-    // Try local cache first
-    try {
-      final local = await _storageService.loadMacroPreferencesLocal();
-      if (local != null && local.isNotEmpty) {
-        final c = local['carbPercent'] ?? local['carb'] ?? 0.0;
-        final p = local['proteinPercent'] ?? local['protein'] ?? 0.0;
-        final f = local['fatPercent'] ?? local['fat'] ?? 0.0;
-        setState(() {
-          _loadedMacro =
-              MacroNutrient(carbPercent: c, proteinPercent: p, fatPercent: f);
-        });
-        return;
-      }
-    } catch (_) {}
-
-    // Fallback: try remote (single read)
-    try {
-  // Muat pengukuran terakhir pengguna dari Firestore.
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid != null) {
-        final remote = await _firestoreService.loadMacroPreferences(uid);
-        if (remote != null) {
-          setState(() => _loadedMacro = remote);
-          // also save locally for faster next load
-          try {
-            await _storageService.saveMacroPreferencesLocal(
-                carbPercent: remote.carbPercent,
-                proteinPercent: remote.proteinPercent,
-                fatPercent: remote.fatPercent);
-          } catch (_) {}
-        }
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _loadLastMeasurement() async {
-    setState(() => _loadingLastMeasurement = true);
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) {
-      setState(() => _loadingLastMeasurement = false);
-      return;
-    }
-    final data = await _firestoreService.loadLastMeasurement(uid);
-    if (mounted) {
-      setState(() {
-        _lastMeasurement = data;
-        _loadingLastMeasurement = false;
-      });
-    }
-  }
-
-  // Clear semua cache sekaligus - dulu di-clear manual di beberapa tempat
-  // dan suka ada yang kelewat (itu penyebab bug macro/snack kemarin).
-  void _invalidateMenuCaches() {
-    _mealFutures.clear();
-    _snackFutures.clear();
-    _allLoadedMeals.clear();
-    _currentMealsData.clear();
-  }
-
-  // Tetapkan tujuan diet dan regenerasi menu yang relevan.
-  void _setDietGoal(DietGoal goal) {
-    // set tujuan diet dan kalori harian yang sesuai
-    // Clear cached menus and tracked nutrition so we don't accumulate old values
-    // (previous bug: changing goal left old _allLoadedMeals/_currentMealsData)
-    setState(() {
-      _invalidateMenuCaches();
-
-      _selectedGoal = goal;
-      _finalCalories = _calculator.getAdjustedCalories(goal, _tdee);
-      // keep selected/loaded macro so the summary remains visible
-    });
-
-    // pre-load menu futures so totals update even when sections remain collapsed
-    _prepareAllSectionFutures();
-    _updateTotals();
-
-    // Simpan measurement ke Firestore
-    _saveMeasurementToFirestore(goal);
-  }
-
-  // Simpan hasil pengukuran dasar ke Firestore.
-  // Simpan measurement (BMI, weight, TDEE, goal) ke Firestore
-  Future<void> _saveMeasurementToFirestore(DietGoal goal) async {
-    try {
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid == null) return;
-
-      final goalStr =
-          goal.toString().split('.').last; // "lose" / "maintain" / "gain"
-
-      await _firestoreService.saveMeasurement(
-        uid: uid,
-        weight: _calculator.weight,
-        bmi: _bmi,
-        tdee: _tdee,
-        goal: goalStr,
-      );
-    } catch (e) {
-      debugPrint('❌ Error in _saveMeasurementToFirestore: $e');
-    }
-  }
-
-  // Buka layar pengaturan makro untuk mengubah komposisi nutrisi.
   void _openMacroCustomization() {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => MacroCustomizationScreen(
-          tdee: _finalCalories ?? _tdee,
+          tdee: _vm.baseCalories,
           onSave: (macro) {
-            // update preferensi makro dan re-generate menu jika pengguna menyimpan
-            setState(() {
-              _selectedMacro = macro;
-              _invalidateMenuCaches(); // termasuk snack, bukan cuma meal
-            });
-
-            // Prefetch new meals with updated macro ratios
-            _prepareAllSectionFutures();
+            _vm.applyMacro(macro);
 
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
@@ -484,13 +84,10 @@ class _ResultsScreenState extends State<ResultsScreen> {
     );
   }
 
-  // Logout pengguna dan bersihkan data lokal.
   Future<void> _logout() async {
     try {
-      await _storageService.hapusDataUser();
-      await _authService.signOut();
+      await _vm.signOut();
       if (mounted) {
-        // Kembali ke halaman Welcome dan hapus semua rute sebelumnya
         Navigator.of(context)
             .pushNamedAndRemoveUntil('/welcome', (route) => false);
       }
@@ -500,7 +97,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
     }
   }
 
-  // Tampilkan dialog konfirmasi sebelum logout.
   void _showLogoutDialog() {
     showDialog(
       context: context,
@@ -525,36 +121,33 @@ class _ResultsScreenState extends State<ResultsScreen> {
   }
 
   @override
-  // Bangun tampilan utama halaman hasil.
   Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: _vm,
+      builder: (context, _) => _buildScaffold(),
+    );
+  }
+
+  Widget _buildScaffold() {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Hasil Hitung'),
         elevation: 0,
         actions: [
           // 1. TOMBOL SEARCH BARU
-          if (_selectedGoal != null)
+          if (_vm.selectedGoal != null)
             IconButton(
               icon: const Icon(Icons.flag_outlined),
               tooltip: 'Ubah Tujuan Diet',
-              onPressed: () {
-                setState(() {
-                  _selectedGoal = null;
-                  _finalCalories = null;
-                  _invalidateMenuCaches();
-                });
-              },
+              onPressed: _vm.resetGoal,
             ),
           IconButton(
             icon: const Icon(Icons.search),
             tooltip: 'Cari Makanan',
             onPressed: () async {
-              // TAMBAHKAN 1 BARIS INI UNTUK DEMO
-              _firestoreService.clearCache(); // Paksa hapus ingatan lama HP
               // Ambil data dulu (cepat kok)
               // Kalau mau lebih cepat lagi, load data ini di initState
-              final allFoods = await _firestoreService.getAllFoodItems();
-              final filteredFoods = _filterAllergicItems(allFoods);
+              final filteredFoods = await _vm.loadSearchableFoods();
               showSearch(
                 context: context,
                 delegate: FoodSearch(
@@ -563,7 +156,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
                     // Reuse fungsi popup detail kamu yang canggih itu!
                     _showFoodDetail(context, item);
                   },
-                  allergens: _excludeAllergies,
+                  allergens: _vm.excludeAllergies,
                 ),
               );
             },
@@ -581,30 +174,26 @@ class _ResultsScreenState extends State<ResultsScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _buildResultCard(
-                'Indeks Massa Tubuh (IMT)', _bmi.toString(), _bmiCategory),
+                'Indeks Massa Tubuh (IMT)', _vm.bmi.toString(), _vm.bmiCategory),
             const SizedBox(height: 16),
-            // show a custom card that includes BMR explanation
             _buildTdeeCard(),
             const SizedBox(height: 12),
-            if (_loadingLastMeasurement)
+            if (_vm.loadingLastMeasurement)
               const Center(
                   child: Padding(
                 padding: EdgeInsets.symmetric(vertical: 8.0),
                 child: CircularProgressIndicator(),
               )),
-            if (!_loadingLastMeasurement && _lastMeasurement != null) ...[
+            if (!_vm.loadingLastMeasurement && _vm.lastMeasurement != null) ...[
               _buildLastMeasurementCard(),
               const SizedBox(height: 24),
             ] else
               const SizedBox(height: 24),
-            if (_selectedGoal == null) _buildGoalSelection(),
-            if (_selectedGoal != null && _finalCalories != null) ...[
-              // The summary card already includes an "Ubah" button to open
-              // the customization screen.  The extra toolbar button above was
-              // redundant and has been removed for a cleaner layout.
-              _buildMacroSummary(), // always show summary (uses default if none saved)
+            if (_vm.selectedGoal == null) _buildGoalSelection(),
+            if (_vm.selectedGoal != null && _vm.finalCalories != null) ...[
+              _buildMacroSummary(),
               const SizedBox(height: 12),
-              _buildMealProgressSummary(), // new progress indicator
+              _buildMealProgressSummary(),
               const SizedBox(height: 16),
               _buildMealPlan(),
             ],
@@ -613,15 +202,13 @@ class _ResultsScreenState extends State<ResultsScreen> {
       ),
     );
   }
-
-  // Tampilkan kartu ringkasan pengukuran terakhir.
   Widget _buildLastMeasurementCard() {
-    if (_lastMeasurement == null) return const SizedBox.shrink();
+    if (_vm.lastMeasurement == null) return const SizedBox.shrink();
 
-    final weight = _lastMeasurement!['weight']?.toString() ?? '-';
-    final bmi = _lastMeasurement!['bmi']?.toString() ?? '-';
-    final tdee = _lastMeasurement!['tdee']?.toString() ?? '-';
-    final ts = _lastMeasurement!['createdAt'];
+    final weight = _vm.lastMeasurement!['weight']?.toString() ?? '-';
+    final bmi = _vm.lastMeasurement!['bmi']?.toString() ?? '-';
+    final tdee = _vm.lastMeasurement!['tdee']?.toString() ?? '-';
+    final ts = _vm.lastMeasurement!['createdAt'];
     String dateStr = '';
     try {
       if (ts is Timestamp) {
@@ -675,14 +262,12 @@ class _ResultsScreenState extends State<ResultsScreen> {
     );
   }
 
-  // Tampilkan pilihan tujuan diet yang sesuai BMI.
   Widget _buildGoalSelection() {
-    // Determine which goals to show based on BMI category
-    bool canLose = !_bmiCategory.toLowerCase().contains('kurus') &&
-        !_bmiCategory.toLowerCase().contains('underweight');
-    bool canMaintain = true; // Always available
-    bool canGain = !_bmiCategory.toLowerCase().contains('overweight') &&
-        !_bmiCategory.toLowerCase().contains('obesitas');
+    bool canLose = !_vm.bmiCategory.toLowerCase().contains('kurus') &&
+        !_vm.bmiCategory.toLowerCase().contains('underweight');
+    bool canMaintain = true;
+    bool canGain = !_vm.bmiCategory.toLowerCase().contains('overweight') &&
+        !_vm.bmiCategory.toLowerCase().contains('obesitas');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -693,18 +278,15 @@ class _ResultsScreenState extends State<ResultsScreen> {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 16),
-        // Show "Menurunkan Berat Badan" only if BMI is not underweight
         if (canLose) ...[
           _buildGoalButton('Menurunkan Berat Badan',
               'Defisit Kalori 500kal/hari', DietGoal.lose),
           const SizedBox(height: 12),
         ],
-        // Always show "Mempertahankan Berat Badan"
         if (canMaintain)
           _buildGoalButton(
               'Mempertahankan Berat Badan', 'Sesuai TDEE', DietGoal.maintain),
         if (canMaintain) const SizedBox(height: 12),
-        // Show "Menaikkan Berat Badan" only if BMI is not overweight/obese
         if (canGain)
           _buildGoalButton('Menaikkan Berat Badan',
               'Surplus Kalori 500kal/hari', DietGoal.gain),
@@ -712,10 +294,9 @@ class _ResultsScreenState extends State<ResultsScreen> {
     );
   }
 
-  // Buat tombol pilihan tujuan diet.
   Widget _buildGoalButton(String title, String subtitle, DietGoal goal) {
     return OutlinedButton(
-      onPressed: () => _setDietGoal(goal),
+      onPressed: () => _vm.setDietGoal(goal),
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.all(16),
         side: const BorderSide(color: Colors.green),
@@ -724,7 +305,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
       child: Column(
         children: [
           Text(title,
-  // Susun daftar menu harian berdasarkan kalori target.
               style: const TextStyle(
                   color: Colors.black,
                   fontSize: 16,
@@ -738,19 +318,16 @@ class _ResultsScreenState extends State<ResultsScreen> {
   }
 
   Widget _buildMealPlan() {
-    // Calorie distribution based on proposal. Use final calories if set, otherwise TDEE
-    final int baseCalories = _finalCalories ?? _tdee;
-    int breakfastCals = (baseCalories * 0.20).round(); // 20%
-    int lunchCals = (baseCalories * 0.30).round(); // 30%
-    int dinnerCals = (baseCalories * 0.30).round(); // 30%
+    final int baseCalories = _vm.baseCalories;
+    int breakfastCals = (baseCalories * 0.20).round();
+    int lunchCals = (baseCalories * 0.30).round();
+    int dinnerCals = (baseCalories * 0.30).round();
 
-    // Snack allocation: 20% → 10% morning + 10% afternoon (per research)
-    int morningSnackCals = (baseCalories * 0.10).round(); // 10%
-    int afternoonSnackCals = (baseCalories * 0.10).round(); // 10%
+    int morningSnackCals = (baseCalories * 0.10).round();
+    int afternoonSnackCals = (baseCalories * 0.10).round();
 
     return Column(
       children: [
-        // Tappable header yang membuka ringkasan nutrisi harian
         InkWell(
           onTap: _showNutritionDetail,
           child: Text(
@@ -781,7 +358,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
     );
   }
 
-  // Bangun section menu utama untuk satu waktu makan.
   Widget _buildMealSection(String title, int targetCalories, bool done,
       ValueChanged<bool?> onToggle) {
     final isExpanded = _expandedSections[title] ?? false;
@@ -804,34 +380,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.green),
             tooltip: "Acak Ulang Menu",
-            onPressed: () {
-              final uid = FirebaseAuth.instance.currentUser?.uid;
-              setState(() {
-                // clear per-card tracked nutrition for this section to avoid
-                // mixing old item values with newly generated ones
-                _currentMealsData
-                    .removeWhere((k, v) => k.startsWith('$title-'));
-                _allLoadedMeals.remove(title);
-                _mealFutures[title] = _firestoreService
-                    .generateMealPlan(
-                  targetCalories,
-                  ratios: _macroRatios(),
-                  excludeAllergens: _excludeAllergies,
-                )
-                    .then((items) {
-                  if (uid != null && _selectedGoal != null) {
-                    _firestoreService.saveSectionMenu(
-                      uid: uid,
-                      section: title,
-                      items: items,
-                      goal: _selectedGoal!.toString().split('.').last,
-                      tdee: _tdee,
-                    );
-                  }
-                  return items;
-                });
-              });
-            },
+            onPressed: () => _vm.refreshMeal(title, targetCalories),
           ),
         ],
       ),
@@ -841,25 +390,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
       },
       children: [
         FutureBuilder<List<FoodItem>>(
-          future: _mealFutures[title] ??= _firestoreService
-              .generateMealPlan(
-            targetCalories,
-            ratios: _macroRatios(),
-            excludeAllergens: _excludeAllergies,
-          )
-              .then((items) {
-            final uid = FirebaseAuth.instance.currentUser?.uid;
-            if (uid != null && _selectedGoal != null) {
-              _firestoreService.saveSectionMenu(
-                uid: uid,
-                section: title,
-                items: items,
-                goal: _selectedGoal!.toString().split('.').last,
-                tdee: _tdee,
-              );
-            }
-            return items;
-          }),
+          future: _vm.mealFuture(title, targetCalories),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Padding(
@@ -878,27 +409,15 @@ class _ResultsScreenState extends State<ResultsScreen> {
 
             var combination = snapshot.data!;
             // Update tracking untuk sumber kebenaran nutrisi harian
-            _allLoadedMeals[title] = combination;
+            // dan nilai awal nutrisi tiap item di section ini
+            _vm.trackMealSection(title, combination);
             int totalCals =
                 combination.fold<int>(0, (sum, item) => sum + item.calories);
-
-            // Set initial nutrition values untuk semua items di section ini
-            combination.asMap().forEach((idx, item) {
-              final key = '$title-$idx';
-              _currentMealsData.putIfAbsent(
-                  key,
-                  () => {
-                        'calories': item.calories.toDouble(),
-                        'protein': item.protein.toDouble(),
-                        'carbs': item.carbs.toDouble(),
-                        'fat': item.fat.toDouble(),
-                      });
-            });
 
             // ✨ PENTING: Update totals langsung setelah meals dimuat
             // Sehingga ringkasan harian terupdate tanpa perlu user buka cards
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              _updateTotals();
+              _vm.updateTotals();
             });
 
             return Padding(
@@ -927,18 +446,9 @@ class _ResultsScreenState extends State<ResultsScreen> {
                     return MealItemCard(
                       foodItem: item,
                       category: item.kategori,
-                      excludedAllergens: _excludeAllergies,
-                      onNutritionChanged: (c, p, carbs, fat) {
-                        setState(() {
-                          _currentMealsData[key] = {
-                            'calories': c,
-                            'protein': p,
-                            'carbs': carbs,
-                            'fat': fat,
-                          };
-                        });
-                        _updateTotals();
-                      },
+                      excludedAllergens: _vm.excludeAllergies,
+                      onNutritionChanged: (c, p, carbs, fat) =>
+                          _vm.setCardNutrition(key, c, p, carbs, fat),
                     );
                   }).toList(),
                 ],
@@ -950,8 +460,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
     );
   }
 
-  // Ringkas progress makan dan snack yang sudah ditandai.
-  // simple summary bar showing number of meals ticked off
   Widget _buildMealProgressSummary() {
     int count = 0;
     if (_breakfastDone) count++;
@@ -977,47 +485,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
     );
   }
 
-  // Buat future rekomendasi snack dengan target kalori tertentu.
-  // SNACK SECTION - Snack Recommendations
-  // Based on research (Bermingham et al., 2024; Almoraie et al., 2021)
-  /// Helper untuk generate snack future (dipakai di refresh & generate pertama)
-  Future<List<FoodItem>> _buildSnackFuture(String title, int targetCalories) {
-    // hitung berapa banyak makro yang sudah terpakai dari menu saat ini
-    double totalCarbsEaten = 0;
-    double totalProteinEaten = 0;
-    double totalFatEaten = 0;
-    _currentMealsData.forEach((key, macros) {
-      totalCarbsEaten += macros['carbs'] ?? 0;
-      totalProteinEaten += macros['protein'] ?? 0;
-      totalFatEaten += macros['fat'] ?? 0;
-    });
-
-    final macro = _selectedMacro ?? _loadedMacro;
-    final dailyCal = _finalCalories ?? _tdee;
-    final dailyTargetCarbs =
-        (dailyCal * (macro?.carbPercent ?? 60.0) / 100) / 4;
-    final dailyTargetProtein =
-        (dailyCal * (macro?.proteinPercent ?? 15.0) / 100) / 4;
-    final dailyTargetFat = (dailyCal * (macro?.fatPercent ?? 25.0) / 100) / 9;
-    // target gram makro berdasarkan kalori harian dan rasio makro
-
-    return _firestoreService.getSnackRecommendations(
-      targetCalories,
-      macroPrefs: macro,
-      dailyTargetCal: dailyCal,
-      dailyTargetCarbs: dailyTargetCarbs,
-      dailyTargetProtein: dailyTargetProtein,
-      dailyTargetFat: dailyTargetFat,
-      macrosEaten: {
-        'carbs': totalCarbsEaten,
-        'protein': totalProteinEaten,
-        'fat': totalFatEaten,
-      },
-      excludeAllergens: _excludeAllergies,
-    );
-  }
-
-  // Bangun section snack untuk satu waktu snack.
   Widget _buildSnackSection(String title, int targetCalories, bool done,
       ValueChanged<bool?> onToggle) {
     final isExpanded = _expandedSections[title] ?? false;
@@ -1039,29 +506,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.orange),
             tooltip: "Acak Ulang Snack",
-            onPressed: () {
-              final uid = FirebaseAuth.instance.currentUser?.uid;
-              setState(() {
-                // clear tracked snack nutrition for this snack section
-                _currentMealsData.removeWhere((k, v) => k == 'snack-$title');
-                _allLoadedMeals.remove(title);
-                _snackFutures[title] =
-                    _buildSnackFuture(title, targetCalories).then((items) {
-                  if (uid != null &&
-                      _selectedGoal != null &&
-                      items.isNotEmpty) {
-                    _firestoreService.saveSectionMenu(
-                      uid: uid,
-                      section: title,
-                      items: [items.first],
-                      goal: _selectedGoal!.toString().split('.').last,
-                      tdee: _tdee,
-                    );
-                  }
-                  return items;
-                });
-              });
-            },
+            onPressed: () => _vm.refreshSnack(title, targetCalories),
           ),
         ],
       ),
@@ -1071,21 +516,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
       },
       children: [
         FutureBuilder<List<FoodItem>>(
-          future: _snackFutures.putIfAbsent(title, () {
-            return _buildSnackFuture(title, targetCalories).then((items) {
-              final uid = FirebaseAuth.instance.currentUser?.uid;
-              if (uid != null && _selectedGoal != null && items.isNotEmpty) {
-                _firestoreService.saveSectionMenu(
-                  uid: uid,
-                  section: title,
-                  items: [items.first],
-                  goal: _selectedGoal!.toString().split('.').last,
-                  tdee: _tdee,
-                );
-              }
-              return items;
-            });
-          }),
+          future: _vm.snackFuture(title, targetCalories),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Padding(
@@ -1104,26 +535,13 @@ class _ResultsScreenState extends State<ResultsScreen> {
             }
 
             var snackItems = snapshot.data!;
-            // Update tracking untuk sumber kebenaran nutrisi harian
-            _allLoadedMeals[title] = snackItems;
+            _vm.trackSnackSection(title, snackItems);
 
-            // Don't sum all option calories (they are separate suggestions).
-            // Show the target snack calories instead so the header matches the plan.
             final int displayedSnackCal = targetCalories;
-            // simply pick the first recommendation sebagai snack utama
             final FoodItem mainItem = snackItems.first;
 
-            // side effect: make sure snack macros are tracked so that
-            // subsequent recommendations and the daily summary use real data
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              final key = 'snack-$title';
-              _currentMealsData[key] = {
-                'calories': mainItem.calories.toDouble(),
-                'protein': mainItem.protein.toDouble(),
-                'carbs': mainItem.carbs.toDouble(),
-                'fat': mainItem.fat.toDouble(),
-              };
-              _updateTotals();
+              _vm.trackSnackMain(title, mainItem);
             });
 
             return Padding(
@@ -1154,21 +572,11 @@ class _ResultsScreenState extends State<ResultsScreen> {
                   MealItemCard(
                     foodItem: mainItem,
                     category: mainItem.kategori,
-                    excludedAllergens: _excludeAllergies,
+                    excludedAllergens: _vm.excludeAllergies,
                     selectable: false,
                     isSelected: false,
-                    onNutritionChanged: (c, p, carbs, fat) {
-                      final key = 'snack-$title';
-                      setState(() {
-                        _currentMealsData[key] = {
-                          'calories': c,
-                          'protein': p,
-                          'carbs': carbs,
-                          'fat': fat,
-                        };
-                      });
-                      _updateTotals();
-                    },
+                    onNutritionChanged: (c, p, carbs, fat) => _vm
+                        .setCardNutrition('snack-$title', c, p, carbs, fat),
                   ),
                 ],
               ),
@@ -1179,9 +587,6 @@ class _ResultsScreenState extends State<ResultsScreen> {
     );
   }
 
-  // Popup Detail Makanan (Modal Sheet)
-
-  // Tampilkan detail lengkap makanan dalam bottom sheet.
   void _showFoodDetail(BuildContext context, FoodItem item) {
     showModalBottomSheet(
       context: context,
@@ -1323,77 +728,15 @@ class _ResultsScreenState extends State<ResultsScreen> {
     );
   }
 
-  // Hitung total nutrisi harian dari semua menu aktif.
-  // hitung total nutrisi dari semua meal yang sudah di-generate
-  // Prioritas: gunakan _allLoadedMeals (sumber kebenaran) jika tersedia
-  // Fallback ke _currentMealsData untuk perubahan yang belum di-persist
-  Map<String, double> _calculateDailyTotals() {
-    double calories = 0, protein = 0, carbs = 0, fat = 0;
-
-    // Build set of section names from both _allLoadedMeals and _currentMealsData
-    final sections = <String>{};
-    sections.addAll(_allLoadedMeals.keys);
-
-    for (final key in _currentMealsData.keys) {
-      if (key.startsWith('snack-')) {
-        sections.add(key.substring('snack-'.length));
-      } else {
-        final idx = key.lastIndexOf('-');
-        if (idx > 0) sections.add(key.substring(0, idx));
-      }
-    }
-
-    // For each section prefer per-card/current data if present, otherwise
-    // fall back to items from _allLoadedMeals. This avoids double-counting
-    // when both sources exist for the same section.
-    for (final section in sections) {
-      final currentKeys = _currentMealsData.keys
-          .where((k) => k == 'snack-$section' || k.startsWith('$section-'))
-          .toList();
-
-      if (currentKeys.isNotEmpty) {
-        for (final k in currentKeys) {
-          final m = _currentMealsData[k]!;
-          calories += (m['calories'] ?? 0);
-          protein += (m['protein'] ?? 0);
-          carbs += (m['carbs'] ?? 0);
-          fat += (m['fat'] ?? 0);
-        }
-      } else if (_allLoadedMeals.containsKey(section)) {
-        for (final item in _allLoadedMeals[section]!) {
-          calories += item.calories;
-          protein += item.protein;
-          carbs += item.carbs;
-          fat += item.fat;
-        }
-      }
-    }
-
-    return {
-      'calories': calories,
-      'protein': protein,
-      'carbs': carbs,
-      'fat': fat
-    };
-  }
-
-  // Perbarui nilai total nutrisi yang dipantau UI.
-  void _updateTotals() {
-    _totalsNotifier.value = _calculateDailyTotals();
-  }
-
   // Tampilkan ringkasan kebutuhan dan konsumsi nutrisi harian.
   // menampilkan modal sheet ringkasan nutrisi harian
   void _showNutritionDetail() {
     // tampilkan detail nutrisi harian berdasarkan ratio yang dipilih atau default
-    final int baseCalories = _finalCalories ?? _tdee;
-    final proteinPerc =
-        _selectedMacro?.proteinPercent ?? _loadedMacro?.proteinPercent ?? 30.0;
-    final carbPerc = _selectedMacro?.carbPercent ??
-        _loadedMacro?.carbPercent ??
-        40.0; // default ratios
-    final fatPerc =
-        _selectedMacro?.fatPercent ?? _loadedMacro?.fatPercent ?? 30.0;
+    final int baseCalories = _vm.baseCalories;
+    final macro = _vm.effectiveMacro;
+    final proteinPerc = macro?.proteinPercent ?? 30.0;
+    final carbPerc = macro?.carbPercent ?? 40.0; // default ratios
+    final fatPerc = macro?.fatPercent ?? 30.0;
 
     final macroService = MacroNutrient(
         proteinPercent: proteinPerc,
@@ -1437,7 +780,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
                   const SizedBox(height: 20),
                   // observe totals notifier for live updates
                   ValueListenableBuilder<Map<String, double>>(
-                    valueListenable: _totalsNotifier,
+                    valueListenable: _vm.totals,
                     builder: (context, totals, _) {
                       double actualCals = totals['calories'] ?? 0;
                       double actualProtein = totals['protein'] ?? 0;
@@ -1568,7 +911,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
   // Tampilkan kartu TDEE dengan penjelasan BMR.
   // specialized card for displaying TDEE with explanation
   Widget _buildTdeeCard() {
-    final level = _calculator.activityLevel;
+    final level = _vm.calculator.activityLevel;
     String factorText = '';
     if (level != null) {
       // format multiplier with up to 3 decimals, but trim trailing zeros
@@ -1592,7 +935,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              _tdee.toString(),
+              _vm.tdee.toString(),
               style: const TextStyle(
                   fontSize: 36,
                   fontWeight: FontWeight.bold,
@@ -1608,7 +951,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
             ),
             const SizedBox(height: 12),
             Text(
-              'BMR: ${_bmr.toStringAsFixed(1)}$factorText',
+              'BMR: ${_vm.bmr.toStringAsFixed(1)}$factorText',
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 12, color: Colors.black54),
             ),
@@ -1643,13 +986,12 @@ class _ResultsScreenState extends State<ResultsScreen> {
 
   // Tampilkan ringkasan makronutrien yang dipilih.
   Widget _buildMacroSummary() {
-    final macro = _selectedMacro ??
-        _loadedMacro ??
+    final macro = _vm.effectiveMacro ??
         MacroNutrient(
             carbPercent: 50.0,
             proteinPercent: 25.0,
             fatPercent: 25.0); // fallback default
-    final int baseCalories = _finalCalories ?? _tdee;
+    final int baseCalories = _vm.baseCalories;
     final grams = macro.calculateGrams(baseCalories);
 
     return Card(
