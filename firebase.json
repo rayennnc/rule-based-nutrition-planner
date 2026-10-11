@@ -1,1 +1,37 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"aplikasi-nutrisi","appId":"1:118733362855:android:88802426a2f0a7c1cc6d82","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"aplikasi-nutrisi","configurations":{"android":"1:118733362855:android:88802426a2f0a7c1cc6d82","ios":"1:118733362855:ios:cd15ca2bb95340efcc6d82","web":"1:118733362855:web:8ce15c4fc74bffd3cc6d82"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "aplikasi-nutrisi",
+          "appId": "1:118733362855:android:88802426a2f0a7c1cc6d82",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "aplikasi-nutrisi",
+          "configurations": {
+            "android": "1:118733362855:android:88802426a2f0a7c1cc6d82",
+            "ios": "1:118733362855:ios:cd15ca2bb95340efcc6d82",
+            "web": "1:118733362855:web:8ce15c4fc74bffd3cc6d82"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
