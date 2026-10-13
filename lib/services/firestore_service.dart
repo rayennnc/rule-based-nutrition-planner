@@ -5,11 +5,8 @@ import 'macro_nutrient.dart';
 
 /// Model data untuk satu item makanan.
 ///
-/// `FoodItem` menyimpan semua atribut yang digunakan oleh rule-based
-/// logika pemilihan menu, rekomendasi snack, dan penyimpanan/firestore.
-/// Di dalam sistem ini, objek ini menjadi unit dasar yang dievaluasi oleh
-/// semua fungsi rule-based lainnya.
-// Menyimpan data dasar satu makanan dari Firestore.
+/// Unit dasar yang dievaluasi oleh fungsi rule-based (pemilihan menu,
+/// rekomendasi snack, dan penyimpanan ke Firestore).
 class FoodItem {
   final String id;
   final String name;
@@ -69,13 +66,11 @@ class FoodItem {
   /// Prioritas:
   /// 1. Cek field alergen eksplisit dari Firestore (admin panel)
   /// 2. Fallback: substring matching pada name/kondisi
-  // Cek apakah makanan cocok dengan alergi pengguna.
   bool matchesAllergens(List<String>? allergens) {
     if (allergens == null || allergens.isEmpty) return false;
 
     // STEP 1: CEK FIELD EKSPLISIT DARI FIRESTORE DULU
     if ((alergen.isNotEmpty)) {
-      // Normalize user allergens ke lowercase
       final userAllergens =
           allergens.map((a) => a.trim().toLowerCase()).toSet();
 
@@ -90,7 +85,6 @@ class FoodItem {
     }
 
     // STEP 2: FALLBACK - Substring matching untuk data lama tanpa field alergen
-    // Lowercase fields for matching
     final nameLower = name.toLowerCase();
     final kategoriLower = kategori.toLowerCase();
     final kondisiLower = kondisi.toLowerCase();
@@ -181,7 +175,6 @@ class FoodItem {
   }
 
   /// Construct a FoodItem from a simple Map (used for isolate serialization)
-  // Buat FoodItem dari map biasa.
   factory FoodItem.fromMap(Map<String, dynamic> m) {
     return FoodItem(
       id: m['id'] as String,
@@ -202,7 +195,6 @@ class FoodItem {
 ///
 /// Rule-based: pilih kombinasi yang cocok dengan target kalori dan
 /// rasio makro opsional.
-// Hitung kombinasi menu terbaik di isolate.
 Future<List<Map<String, dynamic>>> _computeMealPlan(
     Map<String, dynamic> params) async {
   final int targetCalories = params['target'] as int;
@@ -218,9 +210,8 @@ Future<List<Map<String, dynamic>>> _computeMealPlan(
   List<Map<String, dynamic>> buah =
       List<Map<String, dynamic>>.from(params['buah'] as List);
 
-  // helpers to convert back and forth
   FoodItem toFood(Map<String, dynamic> m) =>
-      FirestoreService._mapToFood(m); // uses static helper
+      FirestoreService._mapToFood(m);
 
   // convert all maps to FoodItem once for easy use
   var klist = karbo.map(toFood).toList();
@@ -232,7 +223,6 @@ Future<List<Map<String, dynamic>>> _computeMealPlan(
   List<FoodItem> bestFallback = [];
   double bestScoreFallback = double.infinity;
 
-  // determine combos (similar to original logic but in isolate) memeriksa kombinasi makanan
   void evaluateCombo(List<FoodItem> combo) {
     int total = combo.fold(0, (acc, f) => acc + f.calories);
     int diff = (targetCalories - total).abs();
@@ -339,7 +329,6 @@ Future<List<Map<String, dynamic>>> _computeMealPlan(
     ];
   }
 
-  // return serialized using the static helper on FirestoreService
   return finalCombo.map(FirestoreService._foodToMap).toList();
 }
 
@@ -356,11 +345,6 @@ class MealCombination {
 }
 
 // ===== LOGIC SNACK YANG DITARIK KELUAR BIAR BISA DITEST =====
-// Dulu ini private method di dalam FirestoreService, tapi class itu punya
-// field `_db = FirebaseFirestore.instance` yang langsung jalan pas
-// di-construct - jadi FirestoreService() aja udah crash di unit test tanpa
-// Firebase ke-init. Fungsi di bawah ini nggak nyentuh Firestore sama
-// sekali, makanya ditarik jadi top-level biar bisa langsung ditest.
 
 bool isHighQualitySnack(FoodItem food) {
   final highQualityCategories = [
@@ -414,8 +398,7 @@ double calculateFatPercent(FoodItem food) {
   return (fatCal / food.calories) * 100;
 }
 
-/// Versi murni dari getHighQualitySnacks - nerima allFoods langsung
-/// (bukan fetch dari Firestore sendiri), jadi bisa langsung ditest.
+/// Versi murni dari getHighQualitySnacks - nerima allFoods langsung.
 List<FoodItem> filterHighQualitySnacks(
     List<FoodItem> allFoods, int targetCalories,
     {List<String>? excludeAllergens}) {
@@ -465,8 +448,7 @@ List<FoodItem> filterHighQualitySnacks(
 }
 
 /// Versi murni dari getSnackRecommendations - nerima allFoods langsung.
-/// Ini logic yang mau ditest: kalori diprioritasin duluan, rasio makro
-/// cuma jadi tie-breaker pas last-resort (temuan dari debugging sebelumnya).
+/// Kalori diprioritasin duluan, rasio makro cuma tie-breaker pas last-resort.
 List<FoodItem> filterSnackRecommendations(
   List<FoodItem> allFoods,
   int targetCalories, {
@@ -632,20 +614,16 @@ List<FoodItem> filterSnackRecommendations(
 
 // Layanan utama untuk akses Firestore.
 class FirestoreService {
-// Tambahkan ini
   static final FirestoreService _instance = FirestoreService._internal();
   factory FirestoreService() => _instance;
   FirestoreService._internal();
 
-  // late final: baru jalan pas PERTAMA KALI kepake, bukan pas class-nya
-  // di-construct. Ini penting buat testing - kalau fake subclass nge-override
-  // SEMUA method yang pake _db, baris ini nggak akan pernah kepanggil, jadi
-  // FakeFirestoreService() aman di-construct di test tanpa Firebase ke-init.
+  // late final: baru jalan pas pertama kali kepake, jadi FakeFirestoreService()
+  // aman di-construct di test tanpa Firebase ke-init.
   late final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final Random _random = Random(); // Untuk randomisasi
+  final Random _random = Random();
 
-  // helper serialisation for isolate
-  // Ubah FoodItem menjadi map.
+  // Ubah FoodItem menjadi map (serialisasi untuk isolate).
   static Map<String, dynamic> _foodToMap(FoodItem f) => {
         'id': f.id,
         'name': f.name,
@@ -659,7 +637,6 @@ class FirestoreService {
         'alergen': f.alergen,
       };
 
-  // create from map (reverse)
     // Ubah map kembali menjadi FoodItem.
   static FoodItem _mapToFood(Map<String, dynamic> m) => FoodItem(
         id: m['id'],
@@ -677,13 +654,11 @@ class FirestoreService {
   // Cache sederhana untuk mengurangi beban fetch berulang
   List<FoodItem>? _cachedFoodItems;
 
-  // Clear cache (useful when data changed or when we want fresh fetch)
-    // Hapus cache makanan.
+  // Hapus cache makanan (dipakai saat data berubah atau mau fetch ulang).
   void clearCache() => _cachedFoodItems = null;
 
   // Simpan measurement (BMI, weight, TDEE) ke Firestore
   // Dipanggil setiap kali user set diet goal
-    // Simpan data pengukuran pengguna.
   Future<void> saveMeasurement({
     required String uid,
     required double weight,
@@ -717,7 +692,6 @@ class FirestoreService {
 
   // Simpan macro preferences ke Firestore
   // Dipanggil saat user selesai customize macro ratio
-  // Simpan preferensi makro pengguna.
   Future<void> saveMacroPreferences({
     required String uid,
     required double carbPercent,
@@ -743,7 +717,6 @@ class FirestoreService {
   }
 
   // Load macro preferences from Firestore (returns null if not found)
-  // Ambil preferensi makro dari Firestore.
   Future<MacroNutrient?> loadMacroPreferences(String uid) async {
     try {
       final doc = await _db
@@ -771,7 +744,6 @@ class FirestoreService {
 
   // Load user profile from /users/{uid} (one-time read)
   // Returns null if not found
-  // Ambil profil pengguna dari Firestore.
   Future<Map<String, dynamic>?> loadUserProfile(String uid) async {
     try {
       final doc = await _db.collection('users').doc(uid).get();
@@ -802,7 +774,6 @@ class FirestoreService {
   }
 
   // Load the most recent measurement for a user (measurements subcollection)
-  // Ambil pengukuran terakhir pengguna.
   Future<Map<String, dynamic>?> loadLastMeasurement(String uid) async {
     try {
       final col = _db.collection('users').doc(uid).collection('measurements');
@@ -817,18 +788,14 @@ class FirestoreService {
   }
 
   // Fetch semua food items dari Firestore
-  // Ambil semua data makanan.
   Future<List<FoodItem>> getAllFoodItems() async {
     try {
-      // Check cache dulu
       if (_cachedFoodItems != null && _cachedFoodItems!.isNotEmpty) {
         return _cachedFoodItems!;
       }
 
-      // Jika tidak ada di cache, fetch dari Firestore
       QuerySnapshot snapshot = await _db.collection('makanan').get();
 
-      // Simpan ke cache
       _cachedFoodItems =
           snapshot.docs.map((doc) => FoodItem.fromFirestore(doc)).toList();
       return _cachedFoodItems!;
@@ -839,7 +806,6 @@ class FirestoreService {
   }
 
   // Fetch food items by category for swapping
-  // Ambil kandidat makanan berdasarkan kategori.
   Future<List<FoodItem>> getFoodCandidates(String category,
       {List<String>? excludeAllergens}) async {
     final allFoods = await getAllFoodItems();
@@ -862,7 +828,6 @@ class FirestoreService {
   }
 
   // Group and filter foods to build balanced menus
-        // Kelompokkan makanan menjadi kategori menu seimbang.
   Future<Map<String, List<FoodItem>>> getBalancedFoods(
       {List<String>? excludeAllergens}) async {
     final all = await getAllFoodItems();
@@ -871,7 +836,7 @@ class FirestoreService {
     final edible = all.where((f) {
       final k = f.kategori.toLowerCase();
       final kond = f.kondisi.toLowerCase();
-      final n = f.name.toLowerCase(); // Check nama
+      final n = f.name.toLowerCase();
 
       if (f.matchesAllergens(excludeAllergens)) {
         return false;
@@ -887,7 +852,7 @@ class FirestoreService {
           n.contains('beras'); // Beras diban, Nasi diizinkan
 
       if (isBanned) {
-        return false; // Membuang item yang termasuk di daftar blacklist
+        return false;
       }
 
       // Keep only edible items: Matang / Olahan, Mentah (Lauk), or Buah/Minuman
@@ -897,7 +862,6 @@ class FirestoreService {
           k == 'minuman';
     }).toList();
 
-    // Helper untuk check kategori
     bool catMatches(FoodItem f, List<String> patterns) {
       final k = f.kategori.toLowerCase();
       return patterns.any((p) => k.contains(p));
@@ -970,11 +934,9 @@ class FirestoreService {
   }
 
   // Generate balanced meal plan with SMART SORTING based on Macros
-  // Parameter 'ratios' ditambahkan (opsional) untuk prioritas nutrisi
-  // Generate menu utama yang seimbang.
+  // 'ratios' (opsional) untuk prioritas nutrisi
   Future<List<FoodItem>> generateMealPlan(int targetCalories,
       {Map<String, double>? ratios, List<String>? excludeAllergens}) async {
-    // fetch categories first
     final cats = await getBalancedFoods(excludeAllergens: excludeAllergens);
     final karbo = cats['karbo'] ?? [];
     final lauk = cats['protein'] ?? [];
@@ -1009,7 +971,6 @@ class FirestoreService {
     // compute in background isolate
     final result = await compute(_computeMealPlan, payload);
 
-    // convert back to FoodItem
     return result.map((m) => FoodItem.fromMap(m)).toList();
   }
 
@@ -1017,9 +978,7 @@ class FirestoreService {
   // Based on research (Bermingham et al., 2024; Almoraie et al., 2021)
   // High-quality snacks = whole foods with high nutrient density
   // Snack recommendations = emphasis on protein quality for satiety & appetite control
-  // (Klasifikasi & kalkulasi persen macro sekarang di top-level:
-  // isHighQualitySnack / calculateProteinPercent / calculateCarbPercent /
-  // calculateFatPercent, di atas class ini.)
+  // Klasifikasi dan hitung persen makro ada di top-level (di atas class ini).
 
   /// Get high-quality snacks filtered by target calories
   ///
@@ -1027,7 +986,6 @@ class FirestoreService {
   /// - Whole foods (fruits, vegetables, nuts, seeds, dairy)
   /// - Close to target calorie range (0% first, then ±15% fallback)
   /// - Sorted by calorie proximity (closest calories first)
-  // Ambil snack sehat yang mendekati target kalori.
   Future<List<FoodItem>> getHighQualitySnacks(int targetCalories,
       {List<String>? excludeAllergens}) async {
     try {
@@ -1044,7 +1002,6 @@ class FirestoreService {
   ///
   /// Filter snack sehat, pilih menu yang memenuhi target kalori dan makro,
   /// serta hindari overshoot macro.
-  // Ambil rekomendasi snack berdasarkan aturan nutrisi.
   Future<List<FoodItem>> getSnackRecommendations(int targetCalories,
       {MacroNutrient? macroPrefs,
       int? dailyTargetCal,
@@ -1073,9 +1030,6 @@ class FirestoreService {
   }
 
   // ===== DAILY MENU PERSISTENCE =====
-  // Simpan menu harian ke Firestore dengan key tanggal hari ini
-  // Dipanggil setelah menu digenerate atau di-refresh
-
   // Buat key tanggal untuk menu harian.
   String _todayKey() {
     final now = DateTime.now();
@@ -1085,7 +1039,6 @@ class FirestoreService {
   }
 
   /// Simpan menu 1 section ke Firestore
-  // Simpan menu untuk satu section.
   Future<void> saveSectionMenu({
     required String uid,
     required String section,
@@ -1130,7 +1083,6 @@ class FirestoreService {
 
   /// Load menu harian dari Firestore
   /// Returns null kalau tidak ada data untuk hari ini
-  // Ambil menu harian dari Firestore.
   Future<Map<String, dynamic>?> loadDailyMenu(String uid) async {
     try {
       final doc = await _db
@@ -1149,7 +1101,6 @@ class FirestoreService {
   }
 
   /// Parse list of FoodItem dari data Firestore
-  // Ubah data list Firestore menjadi FoodItem.
   List<FoodItem> parseFoodItems(dynamic data) {
     if (data == null) return [];
     try {
