@@ -234,7 +234,7 @@ Future<List<Map<String, dynamic>>> _computeMealPlan(
 
   // determine combos (similar to original logic but in isolate) memeriksa kombinasi makanan
   void evaluateCombo(List<FoodItem> combo) {
-    int total = combo.fold(0, (sum, f) => sum + f.calories);
+    int total = combo.fold(0, (acc, f) => acc + f.calories);
     int diff = (targetCalories - total).abs();
 
     // RULE 1: jadikan kombinasi valid jika kalori pas (tidak ada toleransi).
@@ -249,10 +249,10 @@ Future<List<Map<String, dynamic>>> _computeMealPlan(
     // secara kalori tetapi juga secara komposisi karbohidrat/protein/lemak.
     if (ratios != null) {
       int tot = total;
-      double carbCals = combo.fold(0, (sum, f) => sum + f.carbs.toDouble() * 4);
+      double carbCals = combo.fold(0, (acc, f) => acc + f.carbs.toDouble() * 4);
       double proteinCals =
-          combo.fold(0, (sum, f) => sum + f.protein.toDouble() * 4);
-      double fatCals = combo.fold(0, (sum, f) => sum + f.fat.toDouble() * 9);
+          combo.fold(0, (acc, f) => acc + f.protein.toDouble() * 4);
+      double fatCals = combo.fold(0, (acc, f) => acc + f.fat.toDouble() * 9);
 
       double percCarbs = carbCals / tot;
       double percProtein = proteinCals / tot;
@@ -351,7 +351,7 @@ class MealCombination {
   MealCombination({required this.items, required this.totalCalories});
 
   int get caloriesDifference =>
-      (totalCalories - items.fold<int>(0, (sum, item) => sum + item.calories))
+      (totalCalories - items.fold<int>(0, (acc, item) => acc + item.calories))
           .abs();
 }
 
@@ -709,9 +709,9 @@ class FirestoreService {
         'createdAt': now,
       });
 
-      print('Measurement saved to Firestore');
+      debugPrint('Measurement saved to Firestore');
     } catch (e) {
-      print('Error saving measurement: $e');
+      debugPrint('Error saving measurement: $e');
     }
   }
 
@@ -736,9 +736,9 @@ class FirestoreService {
         'fatPercent': fatPercent,
         'updatedAt': Timestamp.now(),
       });
-      print('Macro preferences saved to Firestore');
+      debugPrint('Macro preferences saved to Firestore');
     } catch (e) {
-      print('Error saving macro preferences: $e');
+      debugPrint('Error saving macro preferences: $e');
     }
   }
 
@@ -764,7 +764,7 @@ class FirestoreService {
         fatPercent: fat,
       );
     } catch (e) {
-      print('Error loading macro preferences: $e');
+      debugPrint('Error loading macro preferences: $e');
       return null;
     }
   }
@@ -789,13 +789,14 @@ class FirestoreService {
         profile['tanggalLahir'] = (tgl is Timestamp) ? tgl.toDate() : tgl;
       }
       if (data.containsKey('gender')) profile['gender'] = data['gender'];
-      if (data.containsKey('activityLevel'))
+      if (data.containsKey('activityLevel')) {
         profile['activityLevel'] = data['activityLevel'];
+      }
       if (data.containsKey('allergies')) profile['alergi'] = data['allergies'];
 
       return profile;
     } catch (e) {
-      print('Error loading user profile: $e');
+      debugPrint('Error loading user profile: $e');
       return null;
     }
   }
@@ -808,9 +809,9 @@ class FirestoreService {
       final q = await col.orderBy('createdAt', descending: true).limit(1).get();
       if (q.docs.isEmpty) return null;
       final doc = q.docs.first;
-      return doc.data() as Map<String, dynamic>;
+      return doc.data();
     } catch (e) {
-      print('Error loading last measurement: $e');
+      debugPrint('Error loading last measurement: $e');
       return null;
     }
   }
@@ -832,7 +833,7 @@ class FirestoreService {
           snapshot.docs.map((doc) => FoodItem.fromFirestore(doc)).toList();
       return _cachedFoodItems!;
     } catch (e) {
-      print("Error fetching all food items: $e");
+      debugPrint("Error fetching all food items: $e");
       return [];
     }
   }
